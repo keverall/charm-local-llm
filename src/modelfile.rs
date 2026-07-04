@@ -53,6 +53,7 @@ pub fn parse_modelfile_content(content: &str) -> anyhow::Result<Modelfile> {
 
     let mut in_system = false;
     let mut system_content = String::new();
+    let mut system_has_triple_quotes = false;
 
     for line in content.lines() {
         if line.starts_with("FROM ") || line.starts_with("FROM\t") {
@@ -60,16 +61,48 @@ pub fn parse_modelfile_content(content: &str) -> anyhow::Result<Modelfile> {
                 modelfile.from = Some(val.trim().to_string());
             }
         } else if line.starts_with("#") {
-            in_system = false;
+            if !system_has_triple_quotes {
+                in_system = false;
+            }
         } else if line.trim_start().starts_with("SYSTEM ") || line.trim_start() == "SYSTEM" {
             in_system = true;
             system_content.clear();
+            system_has_triple_quotes = false;
             if let Some(rest) = line.split_once("SYSTEM ").map(|x| x.1) {
-                system_content.push_str(rest.trim_start());
+                let rest = rest.trim_start();
+                if rest.starts_with("\"\"\"") {
+                    system_has_triple_quotes = true;
+                    let content = rest.trim_start_matches("\"\"\"");
+                    if content.ends_with("\"\"\"") {
+                        system_content.push_str(content.trim_end_matches("\"\"\""));
+                        in_system = false;
+                        system_has_triple_quotes = false;
+                    } else {
+                        system_content.push_str(content);
+                    }
+                } else {
+                    system_content.push_str(rest);
+                }
             }
         } else if in_system {
-            if line.is_empty() && !system_content.is_empty() {
-                // check if next non-empty line closes the system block
+            if system_has_triple_quotes {
+                if line.ends_with("\"\"\"") {
+                    let content = line.trim_end_matches("\"\"\"");
+                    if !content.is_empty() || !system_content.is_empty() {
+                        if !system_content.is_empty() {
+                            system_content.push('\n');
+                        }
+                        system_content.push_str(content);
+                    }
+                    in_system = false;
+                    system_has_triple_quotes = false;
+                } else {
+                    if !system_content.is_empty() {
+                        system_content.push('\n');
+                    }
+                    system_content.push_str(line);
+                }
+            } else if line.is_empty() && !system_content.is_empty() {
                 in_system = false;
             } else {
                 if !system_content.is_empty() {

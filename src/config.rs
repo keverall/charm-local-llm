@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -55,12 +55,7 @@ impl std::fmt::Display for Platform {
 }
 
 impl Config {
-    pub fn default(platform: Platform) -> Self {
-        let project_root = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("repos")
-            .join("ollama");
-
+    pub fn new(platform: Platform, project_root: &Path) -> Self {
         let qdrant_data_dir = match platform {
             Platform::MacOS => project_root.join("data").join("qdrant"),
             Platform::CachyOS | Platform::Linux => dirs::home_dir()
@@ -128,8 +123,16 @@ impl Config {
                 .join("platform")
                 .join("cachyos-i9-32gb-nvidia-4090")
                 .join("modfiles"),
-            project_root,
+            project_root: project_root.to_path_buf(),
         }
+    }
+
+    pub fn default(platform: Platform) -> Self {
+        let project_root = dirs::home_dir()
+            .unwrap_or_else(|| PathBuf::from("."))
+            .join("repos")
+            .join("ollama");
+        Self::new(platform, &project_root)
     }
 
     pub fn with_env_overrides(mut self, env: std::collections::HashMap<String, String>) -> Self {
@@ -204,11 +207,14 @@ impl Config {
     }
 
     pub fn update_paths_from_project_root(&mut self) {
-        self.modfile_dir = self.project_root
+        self.modfile_dir = self
+            .project_root
             .join("platform")
             .join(match self.platform {
                 Platform::MacOS => "macbook-m4-24gb-optimized",
-                Platform::CachyOS | Platform::Linux | Platform::Unknown => "cachyos-i9-32gb-nvidia-4090",
+                Platform::CachyOS | Platform::Linux | Platform::Unknown => {
+                    "cachyos-i9-32gb-nvidia-4090"
+                }
             })
             .join("modfiles");
     }

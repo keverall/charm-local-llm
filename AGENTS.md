@@ -14,7 +14,7 @@ Rust CLI for Ollama local LLM DevOps — automates setup, optimization, and life
 - `charm status` — Show environment status
 
 ## Local LLM Setup
-- **Primary coding model**: `qwen3-coder:30b-gpu` (RTX 4090, 24GB VRAM)
+- **Primary coding model**: `gemma4:26b-devops` (RTX 4090, 24GB VRAM)
 - **Quick model**: `devstral-small-2-gpu`
 - **Embeddings**: `nomic-embed-text` (768 dims)
 - **Ollama**: http://localhost:11434

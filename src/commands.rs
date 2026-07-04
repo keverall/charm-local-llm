@@ -62,10 +62,8 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
     let platform = detect_platform(args.platform_override.as_deref());
     let env_path = detect_platform_env_path(&project_root, platform);
     let env_vars = load_env_file(&env_path);
-    let mut config = Config::default(platform);
+    let mut config = Config::new(platform, &project_root);
     config = config.with_env_overrides(env_vars);
-    config.project_root = project_root;
-    config.update_paths_from_project_root();
 
     println!("🚀 Starting Ollama DevOps Environment...");
     println!("   Platform: {}", config.platform);
@@ -266,7 +264,7 @@ async fn stop(args: StopArgs, verbose: bool) -> anyhow::Result<()> {
     let platform = detect_platform(args.platform_override.as_deref());
     let env_path = detect_platform_env_path(&project_root, platform);
     let env_vars = load_env_file(&env_path);
-    let config = Config::default(platform).with_env_overrides(env_vars);
+    let config = Config::new(platform, &project_root).with_env_overrides(env_vars);
 
     println!("🛑 Shutting Down Ollama DevOps Environment...");
 
@@ -338,7 +336,7 @@ async fn status(_args: StatusArgs, verbose: bool) -> anyhow::Result<()> {
     let platform = detect_platform(None);
     let env_path = detect_platform_env_path(&project_root, platform);
     let env_vars = load_env_file(&env_path);
-    let config = Config::default(platform).with_env_overrides(env_vars);
+    let config = Config::new(platform, &project_root).with_env_overrides(env_vars);
 
     let client = OllamaClient::new(config.clone());
 
@@ -384,7 +382,7 @@ async fn models(args: ModelsArgs, verbose: bool) -> anyhow::Result<()> {
     let platform = detect_platform(None);
     let env_path = detect_platform_env_path(&project_root, platform);
     let env_vars = load_env_file(&env_path);
-    let config = Config::default(platform).with_env_overrides(env_vars);
+    let config = Config::new(platform, &project_root).with_env_overrides(env_vars);
     let client = OllamaClient::new(config.clone());
 
     match args.action {
@@ -415,7 +413,7 @@ async fn service(args: ServiceArgs, verbose: bool) -> anyhow::Result<()> {
     let platform = detect_platform(None);
     let env_path = detect_platform_env_path(&project_root, platform);
     let env_vars = load_env_file(&env_path);
-    let config = Config::default(platform).with_env_overrides(env_vars);
+    let config = Config::new(platform, &project_root).with_env_overrides(env_vars);
 
     if !matches!(config.platform, Platform::CachyOS | Platform::Linux) {
         println!("Service management only available on Linux (CachyOS)");
@@ -485,7 +483,7 @@ async fn qdrant(args: QdrantArgs, verbose: bool) -> anyhow::Result<()> {
     let platform = detect_platform(None);
     let env_path = detect_platform_env_path(&project_root, platform);
     let env_vars = load_env_file(&env_path);
-    let config = Config::default(platform).with_env_overrides(env_vars);
+    let config = Config::new(platform, &project_root).with_env_overrides(env_vars);
 
     let docker =
         find_docker_compose().ok_or_else(|| anyhow::anyhow!("docker-compose not found"))?;
@@ -799,7 +797,7 @@ async fn crush(args: CrushArgs, verbose: bool) -> anyhow::Result<()> {
     let platform = detect_platform(None);
     let env_path = detect_platform_env_path(&project_root, platform);
     let env_vars = load_env_file(&env_path);
-    let config = Config::default(platform).with_env_overrides(env_vars);
+    let config = Config::new(platform, &project_root).with_env_overrides(env_vars);
 
     match args.action {
         CrushAction::Init => {
@@ -859,7 +857,7 @@ async fn kilo(args: KiloArgs, verbose: bool) -> anyhow::Result<()> {
     let platform = detect_platform(None);
     let env_path = detect_platform_env_path(&project_root, platform);
     let env_vars = load_env_file(&env_path);
-    let config = Config::default(platform).with_env_overrides(env_vars);
+    let config = Config::new(platform, &project_root).with_env_overrides(env_vars);
 
     match args.action {
         KiloAction::Init => {

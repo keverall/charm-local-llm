@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::modelfile::parse_modelfile_content;
 use regex::Regex;
 use reqwest::Client;
 use std::path::PathBuf;
@@ -133,12 +134,36 @@ impl OllamaClient {
             let _ = self.remove_model(model_name).await;
         }
 
-        let url = format!("{}/api/create", self.base_url());
-        let payload = serde_json::json!({
+        let parsed_modelfile = parse_modelfile_content(&modelfile_content)?;
+        let mut payload = serde_json::json!({
             "name": model_name,
-            "modelfile": modelfile_content,
             "stream": true,
         });
+
+        if let Some(from) = parsed_modelfile.from {
+            payload["from"] = serde_json::Value::String(from);
+        }
+
+        if let Some(system) = parsed_modelfile.system {
+            payload["system"] = serde_json::Value::String(system);
+        }
+
+        if !parsed_modelfile.parameters.is_empty() {
+            let mut params = serde_json::Map::new();
+            for param in &parsed_modelfile.parameters {
+                params.insert(
+                    param.key.clone(),
+                    serde_json::Value::String(param.value.clone()),
+                );
+            }
+            payload["parameters"] = serde_json::Value::Object(params);
+        }
+
+        if let Some(template) = parsed_modelfile.template {
+            payload["template"] = serde_json::Value::String(template);
+        }
+
+        let url = format!("{}/api/create", self.base_url());
 
         info!(
             "Creating model '{}' from modelfile: {:?}",
