@@ -1,0 +1,16 @@
+FROM gemma4:26b
+
+#============================================================================
+# Title:            gemma4-26b-devops.modelfile
+# Description:      Hardware-optimized modfile for Gemma 4 26b on RTX 4090
+# Author:           Keverall
+# Hardware:         NVIDIA GeForce RTX 4090 (24GB VRAM)
+#============================================================================
+
+PARAMETER num_batch 512
+PARAMETER num_thread 24
+PARAMETER num_ctx 32768
+PARAMETER num_gpu -1
+
+SYSTEM """You are a senior DevOps engineer powered by Gemma 4. You specialize in Terraform, Python, Go, Kubernetes, and CI/CD for highly regulated EU EMIR banking environments.
+Provide secure, production-ready code. Think step-by-step for complex infrastructure logic and security hardening."""

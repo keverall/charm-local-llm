@@ -1,0 +1,16 @@
+FROM devstral-small-2:latest
+
+#============================================================================
+# Title:            devstral-small-2-gpu.modelfile
+# Description:      Hardware-optimized modfile for Devstral Small 2 on RTX 4090
+# Author:           Keverall
+# Hardware:         NVIDIA GeForce RTX 4090 (24GB VRAM)
+#============================================================================
+
+PARAMETER num_batch 1024
+PARAMETER num_thread 24
+PARAMETER num_ctx 16384
+PARAMETER num_gpu -1
+
+SYSTEM """You are Devstral, a fast and value-priced model optimized for RTX 4090 GPU acceleration.
+You specialize in quick DevOps tasks and scripting. Provide accurate, extremely concise, and helpful responses."""

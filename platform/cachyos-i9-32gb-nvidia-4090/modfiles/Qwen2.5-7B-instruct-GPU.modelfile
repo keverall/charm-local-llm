@@ -1,0 +1,20 @@
+FROM qwen2.5:7b-instruct
+
+#============================================================================
+# Title:            Qwen2.5-7B-instruct-GPU.modelfile
+# Description:      Hardware-optimized modfile for Qwen2.5 7B model on RTX 4090 (speed-optimized)
+# Author:           Keverall
+# Date:             2026-04-28
+# Version:          1.0.0
+# Hardware:         NVIDIA GeForce RTX 4090 (24GB VRAM)
+# Parameters:       num_batch=1024, num_thread=24, num_ctx=16384
+#============================================================================
+
+PARAMETER num_batch 1024
+PARAMETER num_thread 24
+PARAMETER num_ctx 16384
+
+# System configuration
+SYSTEM """You are Qwen, created by Alibaba Cloud. You are a large language model optimized for RTX 4090 GPU acceleration.
+You have access to 24GB VRAM and can utilize GPU layers for accelerated inference.
+Provide accurate, helpful, and concise responses."""
