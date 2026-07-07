@@ -226,12 +226,21 @@ fn patch_kilo_providers(
 
     let provider = obj.entry("provider").or_insert_with(|| json!({}));
     if let Some(provider_obj) = provider.as_object_mut() {
-        let existing = provider_obj.get("ollama");
-        if existing.is_none() || existing != Some(&ollama_provider) {
-            provider_obj.insert("ollama".to_string(), ollama_provider);
-            info!("Added Ollama provider to kilo.json");
-            return Ok(true);
+        let mut changed = false;
+
+        if provider_obj.remove("ollama").is_some() {
+            info!("Removed duplicate 'ollama' provider from kilo.json");
+            changed = true;
         }
+
+        let existing = provider_obj.get("Ollama Local (FREE)");
+        if existing.is_none() || existing != Some(&ollama_provider) {
+            provider_obj.insert("Ollama Local (FREE)".to_string(), ollama_provider);
+            info!("Added Ollama Local (FREE) provider to kilo.json");
+            changed = true;
+        }
+
+        return Ok(changed);
     }
 
     Ok(false)

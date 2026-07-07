@@ -250,6 +250,8 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         Err(e) => warn!("   Failed to write AGENTS.md: {}", e),
     }
 
+    reload_vscode_window();
+
     print_final_status(&client).await;
 
     println!("✅✅✅ Environment Started Successfully ✅✅✅");
@@ -778,6 +780,10 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
     }
 
     None
+}
+
+fn reload_vscode_window() {
+    println!("   💡 Reload VS Code window to pick up config changes (Ctrl+Shift+P → Developer: Reload Window)");
 }
 
 fn init_logging(verbose: bool) {
