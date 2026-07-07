@@ -25,7 +25,7 @@ charm-local-llm/
 │           ├── devstral-small-2-gpu.modelfile
 │           ├── gemma4-26b-devops.modelfile
 │           ├── nomic-embed-text-GPU.modelfile
-│           └── Qwen2.5-7B-instruct-GPU.modelfile
+│           └── qwen3-8b-gpu.modelfile
 ├── tests/
 │   └── integration_test.rs
 ├── .crush/                      Crush TUI local data (DB, logs)
@@ -55,6 +55,7 @@ charm-local-llm/
 | Model | Role | VRAM |
 | ------- | ------ | ------ |
 | `qwen3-coder:30b-gpu` | Primary — coding, complex reasoning | ~18GB |
+| `qwen3:8b` | Lightweight general-purpose (newest Qwen3 arch) | ~5GB |
 | `devstral-small-2-gpu` | Quick — fast responses, simple tasks | ~15GB |
 | `nomic-embed-text` | Embeddings for semantic search (768 dims) | ~300MB |
 | `gemma4:26b-devops` | Alternative coding model | ~17GB |

@@ -95,6 +95,7 @@ impl Config {
             Platform::CachyOS | Platform::Linux => (
                 vec![
                     "qwen3-coder:30b-gpu".into(),
+                    "qwen3:8b".into(),
                     "nomic-embed-text:latest".into(),
                 ],
                 Some("qwen3-coder:30b-gpu".into()),

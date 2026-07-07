@@ -97,13 +97,13 @@ pub fn build_crush_config(config: &Config) -> CrushConfig {
     let known_models = vec![
         ("qwen3-coder:30b-gpu", "Qwen3 Coder 30B GPU"),
         ("qwen3-coder:30b", "Qwen3 Coder 30B"),
+        ("qwen3:8b", "Qwen3 8B"),
         ("gemma4:26b-devops", "Gemma 4 26B Devops"),
         ("gemma4:26b", "Gemma 4 26B"),
         ("devstral-small-2-gpu", "Devstral Small 2 GPU"),
         ("devstral-small-2", "Devstral Small 2"),
         ("nomic-embed-text", "Nomic Embed Text"),
         ("nomic-embed-text:latest", "Nomic Embed Text"),
-        ("qwen2.5:7b-instruct", "Qwen 2.5 7B Instruct"),
     ];
 
     let label = |id: &str| {
