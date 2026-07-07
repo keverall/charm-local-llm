@@ -33,6 +33,18 @@ pub enum Platform {
 }
 
 impl Platform {
+    /// Parse a platform string into a `Platform` variant.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use charm_local_llm::Platform;
+    ///
+    /// assert_eq!(Platform::from_string("cachyos"), Platform::CachyOS);
+    /// assert_eq!(Platform::from_string("macos"), Platform::MacOS);
+    /// assert_eq!(Platform::from_string("linux"), Platform::Linux);
+    /// assert_eq!(Platform::from_string("unknown"), Platform::Unknown);
+    /// ```
     pub fn from_string(s: &str) -> Self {
         match s {
             "macos" | "macbook" => Platform::MacOS,
@@ -135,6 +147,21 @@ impl Config {
         Self::new(platform, &project_root)
     }
 
+    /// Apply environment variable overrides to the configuration.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use charm_local_llm::{Config, Platform};
+    /// use std::collections::HashMap;
+    ///
+    /// let mut env = HashMap::new();
+    /// env.insert("OLLAMA_PORT".to_string(), "11435".to_string());
+    ///
+    /// let config = Config::default(Platform::CachyOS).with_env_overrides(env);
+    /// assert_eq!(config.ollama_port, 11435);
+    /// assert_eq!(config.ollama_base_url, "http://localhost:11435");
+    /// ```
     pub fn with_env_overrides(mut self, env: std::collections::HashMap<String, String>) -> Self {
         if let Some(v) = env.get("OLLAMA_HOST") {
             self.ollama_host = v.clone();

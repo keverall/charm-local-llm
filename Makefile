@@ -14,7 +14,7 @@
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 CARGO      := cargo
-BIN_NAME   := charm-local-llm
+BIN_NAME   := kcharm
 PROFILE    := dev
 
 # ─── Metadata ─────────────────────────────────────────────────────────────────
@@ -38,11 +38,10 @@ info: ## Print project info
 	@echo "Profile:  $(PROFILE)"
 
 # ─── Dependency Setup ──────────────────────────────────────────────────────────
-.PHONY: setup check-deps setup-tools setup-checkmake setup-ollama setup-docker
+.PHONY: setup check-deps setup-tools setup-checkmake setup-ollama setup-docker setup-install setup-fish setup-powershell install
 
-setup: check-deps setup-tools ## Install all project dependencies and verify tools
-	@$(MAKE) setup-checkmake setup-ollama setup-docker
-	@echo "[setup] Done. Run 'make build' to compile."
+setup: check-deps setup-tools setup-checkmake setup-ollama setup-docker setup-install ## Install deps, build, and install kcharm
+	@echo "[setup] Done. Run 'kcharm start' or 'make run-start'"
 
 setup-tools: ## Ensure Rust toolchain, rustfmt, and clippy
 	@rustc --version >/dev/null 2>&1 || (echo "[error] rustc not found. Install from https://rustup.rs" && exit 1)
@@ -64,6 +63,27 @@ setup-docker: ## Check Docker and docker-compose
 		echo "[warn] Docker not found — Qdrant requires Docker"
 	@command -v docker-compose >/dev/null 2>&1 && echo "[setup] docker-compose found" || \
 		echo "[warn] docker-compose not found — Qdrant requires docker-compose"
+
+setup-install: ## Build and install kcharm to ~/.local/bin
+	@$(MAKE) build
+	@mkdir -p ~/.local/bin
+	@cp target/debug/$(BIN_NAME) ~/.local/bin/$(BIN_NAME)
+	@echo "[setup] Installed $(BIN_NAME) to ~/.local/bin/"
+	@echo "Add to PATH: Fish: set -U fish_user_paths ~/.local/bin \$$fish_user_paths"
+
+setup-fish: ## Add kcharm to fish PATH
+	@mkdir -p ~/.local/bin
+	@$(MAKE) build
+	@cp target/debug/$(BIN_NAME) ~/.local/bin/$(BIN_NAME)
+	@fish -c "set -U fish_user_paths ~/.local/bin \$$fish_user_paths" 2>/dev/null || \
+		echo "[setup] kcharm installed. Restart fish or run: set -U fish_user_paths ~/.local/bin \$$fish_user_paths"
+
+setup-powershell: ## Add kcharm to PowerShell PATH
+	@mkdir -p ~/.local/bin
+	@$(MAKE) build
+	@cp target/debug/$(BIN_NAME) ~/.local/bin/$(BIN_NAME)
+	@echo "[setup] kcharm installed to ~/.local/bin/"
+	@echo "PowerShell: [Environment]::SetEnvironmentVariable('PATH', \$$env:PATH + ';\$$HOME\.local\bin', 'User')"
 
 check-deps:
 	@if ! command -v $(CARGO) >/dev/null 2>&1; then \
@@ -171,6 +191,8 @@ run-models: ## Manage models
 
 run-qdrant: ## Manage Qdrant container
 	$(CARGO) run --profile $(PROFILE) -- qdrant $(ARGS)
+
+install: setup-install ## Build and install kcharm to ~/.local/bin
 
 # ─── Crusher (Crush) ─────────────────────────────────────────────────────────
 .PHONY: crush-init crush-status crush-context

@@ -116,16 +116,34 @@ pub fn generate_agents_md(config: &Config) -> String {
     format!(
         r#"# charm-local-llm
 
-Rust CLI for Ollama local LLM DevOps — automates setup, optimization, and lifecycle management of Ollama on CachyOS with NVIDIA RTX 4090.
+Rust CLI that automates setup, optimization, and lifecycle management of local Ollama LLMs on CachyOS with NVIDIA RTX 4090. Generates coding assistant configs for Crush and Kilocode so your entire AI toolchain runs locally.
 
-## Architecture
-- **Rust CLI** using `clap` for subcommands
-- **Ollama** for local LLM inference (RTX 4090 optimized)
-- **Qdrant** for vector database (semantic search)
-- **Crush** integration for agentic coding with local models
+## Project Structure
+
+```text
+charm-local-llm/
+├── src/
+│   ├── main.rs                  Entry point
+│   ├── cli.rs                   clap CLI definitions
+│   ├── commands.rs              start/stop/status/crush/kilo/etc
+│   ├── config.rs                Config struct + platform defaults
+│   ├── crush.rs                 Crush config (~/.config/crush/crush.json)
+│   ├── kilo_integration.rs      Kilo config patching + AGENTS.md
+│   ├── modelfile.rs             Ollama modelfile parser
+│   ├── ollama.rs                Ollama HTTP API client
+│   └── platform.rs              Platform detection + env loading
+├── platform/
+│   └── cachyos-i9-32gb-nvidia-4090/
+│       ├── .env                 Platform env overrides
+│       └── modfiles/            GPU-optimized model definitions
+├── tests/integration_test.rs
+├── docker-compose.yml           Qdrant vector DB
+├── AGENTS.md / CRUSH.md         Auto-generated project context
+└── Makefile
+```
 
 ## Key Commands
-- `charm start` — Start Ollama + models + Qdrant + configure Crush
+- `charm start` — Start Ollama + models + Qdrant + generate Crush/Kilo configs
 - `charm stop` — Stop everything
 - `charm status` — Show environment status
 
@@ -135,6 +153,25 @@ Rust CLI for Ollama local LLM DevOps — automates setup, optimization, and life
 - **Embeddings**: `nomic-embed-text` (768 dims)
 - **Ollama**: http://localhost:{port}
 - **Qdrant**: http://localhost:{qdrant}
+
+## Crush Integration
+`charm start` generates `~/.config/crush/crush.json`:
+- **Provider**: `ollama` at `http://localhost:{port}/v1/` with `discover_models: true`
+- **large + medium** → `{devops}` (8192 max tokens)
+- **small** → `{quick}` (4096 max tokens)
+- **Context paths**: CRUSH.md, AGENTS.md, .clinerules
+
+Also generates `CRUSH.md` in the project root as model context for Crush.
+
+## Kilocode Integration
+`charm start` patches `~/.config/kilo/kilo.json` indexing section:
+- **Provider**: `ollama`, **baseUrl**: `http://localhost:{port}`
+- **Model**: `nomic-embed-text` (768 dims)
+- **Vector store**: `qdrant` at `http://localhost:{qdrant}`
+
+Kilo chat models route through the Kilo Gateway (not Ollama). Local Ollama is used only for code indexing and semantic search.
+
+Also generates `AGENTS.md` in the project root as context for Kilocode.
 
 ## Development
 ```bash
@@ -153,9 +190,10 @@ make setup     # install dependencies
 - Keep functions small and focused
 
 ## Integration Points
-- Crush config: `~/.config/crush/crush.json` (auto-generated on `charm start`)
-- Kilo indexing: `~/.config/kilo/kilo.json` (Ollama + Qdrant)
-- CRUSH.md: Project root context file (auto-generated)
+- Crush config: `~/.config/crush/crush.json` (auto-generated)
+- Kilo indexing: `~/.config/kilo/kilo.json` (auto-patched)
+- CRUSH.md: project root context (auto-generated)
+- AGENTS.md: project root context (auto-generated)
 "#,
         devops = devops,
         quick = quick,

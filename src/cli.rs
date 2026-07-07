@@ -2,8 +2,8 @@ use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "charm")]
-#[command(about = "Setup and optimize Charm for local Ollama LLMs (CachyOS RTX 4090)", long_about = None)]
+#[command(name = "kcharm")]
+#[command(about = "Setup and optimize KCharm for local Ollama LLMs (CachyOS RTX 4090)", long_about = None)]
 #[command(version = "0.1.0")]
 pub struct Cli {
     #[command(subcommand)]

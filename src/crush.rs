@@ -289,7 +289,20 @@ pub fn generate_crush_md(config: &Config) -> String {
 | `{devops}` | Primary coding, complex reasoning | ~18GB |
 | `{quick}` | Fast responses, simple tasks | ~15GB |
 | `nomic-embed-text` | Embeddings for RAG/search | ~300MB |
-| `gemma4:26b` | Alternative coding model | ~17GB |
+| `gemma4:26b-devops` | Alternative coding model | ~17GB |
+
+## Crush Config
+- Config path: `~/.config/crush/crush.json`
+- Provider: `ollama` at `http://localhost:{port}/v1/` with `discover_models: true`
+- **large / medium** → `{devops}` (8192 max tokens)
+- **small** → `{quick}` (4096 max tokens)
+- Context paths: CRUSH.md, AGENTS.md, .clinerules
+
+## Kilocode Indexing
+- Config path: `~/.config/kilo/kilo.json`
+- Indexing provider: `ollama` (code search and embeddings only)
+- Embedding model: `nomic-embed-text` (768 dims), vector store: Qdrant
+- Chat models route through Kilo Gateway, not Ollama
 
 ## Guidelines
 - Prefer local Ollama models for all development tasks

@@ -3,9 +3,13 @@ name = "charm-local-llm"
 version = "0.1.0"
 edition = "2021"
 authors = ["Keverall"]
-description = "Setup and optimize Charm for local Ollama LLMs on CachyOS RTX 4090"
+description = "Setup and optimize KCharm for local Ollama LLMs on CachyOS RTX 4090"
 repository = "https://github.com/keverall/charm-local-llm"
 license = "MIT"
+
+[[bin]]
+name = "kcharm"
+path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
