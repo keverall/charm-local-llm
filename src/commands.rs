@@ -758,7 +758,7 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
                 "qwen3-coder:30b-gpu" => vec!["qwen3-coder-30b-gpu.modelfile".into()],
                 "gemma4:26b-devops" => vec!["gemma4-26b-devops.modelfile".into()],
                 "devstral-small-2-gpu" => vec!["devstral-small-2-gpu.modelfile".into()],
-                "qwen2.5:7b-instruct" => vec!["Qwen2.5-7B-instruct-GPU.modelfile".into()],
+                "qwen3:8b" => vec!["qwen3-8b-gpu.modelfile".into()],
                 "nomic-embed-text:latest" | "nomic-embed-text" => {
                     vec!["nomic-embed-text-GPU.modelfile".into()]
                 }

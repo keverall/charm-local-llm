@@ -1,0 +1,21 @@
+FROM qwen3:8b
+
+#============================================================================
+# Title:            qwen3-8b-gpu.modelfile
+# Description:      Hardware-optimized modfile for Qwen3 8B on RTX 4090
+# Author:           Keverall
+# Date:             2026-07-07
+# Model:            Qwen3-8B-Instruct-2507 (Q4_K_M default)
+# VRAM:             ~5.2 GB (leaves >18 GB for KV cache + other models)
+# Parameters:       num_batch=2048, num_thread=24, num_ctx=40960
+# Notes:            Native instruct model — no separate -instruct tag needed
+#============================================================================
+
+PARAMETER num_batch 2048
+PARAMETER num_thread 24
+PARAMETER num_ctx 40960
+
+SYSTEM """You are Qwen3, created by Alibaba Cloud.
+You are a large language model optimized for RTX 4090 GPU acceleration.
+You have access to 24GB VRAM and can utilize GPU layers for accelerated inference.
+Respond with clear, accurate, and concise answers."""
