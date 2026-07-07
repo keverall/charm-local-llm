@@ -27,23 +27,19 @@ charm-local-llm/
 ```
 
 ## Key Commands
-
 - `charm start` — Start Ollama + models + Qdrant + generate Crush/Kilo configs
 - `charm stop` — Stop everything
 - `charm status` — Show environment status
 
 ## Local LLM Setup
-
 - **Primary coding model**: `gemma4:26b-devops` (RTX 4090, 24GB VRAM)
 - **Quick model**: `devstral-small-2-gpu`
 - **Embeddings**: `nomic-embed-text` (768 dims)
-- [**Ollama**:](http://localhost:11434)
-- [**Qdrant**:](http://localhost:6333)
+- **Ollama**: http://localhost:11434
+- **Qdrant**: http://localhost:6333
 
 ## Crush Integration
-
 `charm start` generates `~/.config/crush/crush.json`:
-
 - **Provider**: `ollama` at `http://localhost:11434/v1/` with `discover_models: true`
 - **large + medium** → `gemma4:26b-devops` (8192 max tokens)
 - **small** → `devstral-small-2-gpu` (4096 max tokens)
@@ -52,9 +48,7 @@ charm-local-llm/
 Also generates `CRUSH.md` in the project root as model context for Crush.
 
 ## Kilocode Integration
-
 `charm start` patches `~/.config/kilo/kilo.json` indexing section:
-
 - **Provider**: `ollama`, **baseUrl**: `http://localhost:11434`
 - **Model**: `nomic-embed-text` (768 dims)
 - **Vector store**: `qdrant` at `http://localhost:6333`
@@ -64,7 +58,6 @@ Kilo chat models route through the Kilo Gateway (not Ollama). Local Ollama is us
 Also generates `AGENTS.md` in the project root as context for Kilocode.
 
 ## Development
-
 ```bash
 make build     # compile
 make test      # run tests
@@ -75,14 +68,12 @@ make setup     # install dependencies
 ```
 
 ## Code Style
-
 - Follow Rust conventions
 - Use `anyhow` for error handling
 - No unnecessary comments
 - Keep functions small and focused
 
 ## Integration Points
-
 - Crush config: `~/.config/crush/crush.json` (auto-generated)
 - Kilo indexing: `~/.config/kilo/kilo.json` (auto-patched)
 - CRUSH.md: project root context (auto-generated)
