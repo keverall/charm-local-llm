@@ -1,10 +1,56 @@
+# Build directories
 /target
-**/*.rs.bk
-Cargo.lock
-*.orig
-.idea/
-.vscode/
+/out
+
+# Cargo directories
+/.cargo
+/Cargo.lock
+
+# Log files
+/logs
+
+# Environment files
 .env
 .env.local
-logs/
-coverage/
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+.vscode-test/
+
+# Coverage
+/coverage
+
+# Rust binary artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+
+# Generated files
+*.rs.bk
+*.orig
+
+# Test results
+/test-results
+
+# Temporary files
+*~
+
+# Crates
+/.crates.toml
+
+# Profiling
+/profile
+
+# Clippy output
+/clippy.toml
+
+# rustfmt output
+/rustfmt.toml
+
+# Other Rust-specific files
+.DS_Store
