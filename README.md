@@ -46,7 +46,7 @@ charm-local-llm/
 - Manages local models — pull, ensure from modelfile, remove, warmup
 - Starts Qdrant vector database via docker-compose
 - **Generates Crush config** (`~/.config/crush/crush.json`) for local-first agentic coding
-- **Patches Kilocode config** (`~/.config/kilo/kilo.json`) for local Ollama indexing/embeddings
+- **Cleans up Kilocode config** (`~/.config/kilo/kilo.json`) by removing unsupported `indexing` blocks
 - Generates `CRUSH.md` and `AGENTS.md` project context files
 - Manages Ollama systemd service lifecycle
 
@@ -73,25 +73,9 @@ Also generates `CRUSH.md` in the project root with model info and guidelines for
 
 ## Kilocode Integration
 
-`kcharm start` patches `~/.config/kilo/kilo.json` indexing config:
+`kcharm start` generates `AGENTS.md` in the project root with project context that Kilocode reads automatically.
 
-```json
-{
-  "indexing": {
-    "provider": "ollama",
-    "ollama": { "baseUrl": "http://localhost:11434" },
-    "model": "nomic-embed-text",
-    "dimension": 768,
-    "qdrant": { "url": "http://localhost:6333" },
-    "vectorStore": "qdrant",
-    "enabled": true
-  }
-}
-```
-
-Kilo chat models route through the Kilo Gateway (not Ollama). Local Ollama is used for code indexing and semantic search only.
-
-Also generates `AGENTS.md` in the project root with project context that Kilocode reads automatically.
+Kilo chat models route through the Kilo Gateway. Local Ollama is used for chat model inference via the Gateway when local models are selected.
 
 ## Quick Start
 
@@ -132,7 +116,7 @@ kcharm crush init                     # Generate ~/.config/crush/crush.json
 kcharm crush status                   # Show Crush config status
 kcharm crush context                  # Generate CRUSH.md
 
-kcharm kilo init                      # Patch kilo.json for local Ollama indexing
+kcharm kilo init                      # Remove unsupported indexing block from kilo.json
 kcharm kilo status                    # Show Kilo config status
 kcharm kilo context                   # Generate AGENTS.md
 
@@ -170,8 +154,8 @@ make run-models ARGS="list"   # Manage models
 make run-qdrant ARGS="start"  # Manage Qdrant
 make crush-init   # Generate Crush config
 make crush-status # Show Crush config status
-make kilo-init    # Patch Kilo indexing config
-make kilo-status  # Show Kilo indexing config status
+make kilo-init    # Remove unsupported indexing block from kilo.json
+make kilo-status  # Show Kilo config status
 ```
 
 ## Prerequisites

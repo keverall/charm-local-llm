@@ -241,8 +241,8 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         Err(e) => warn!("   Failed to write CRUSH.md: {}", e),
     }
     match crate::kilo_integration::patch_kilo_indexing(&config) {
-        Ok(true) => println!("   ✅ Kilo indexing patched for local Ollama"),
-        Ok(false) => println!("   ✅ Kilo indexing already configured"),
+        Ok(true) => println!("   ✅ Kilo config cleaned up (removed unsupported indexing block)"),
+        Ok(false) => println!("   ✅ Kilo config has no unsupported indexing block"),
         Err(e) => warn!("   Failed to patch Kilo config: {}", e),
     }
     match crate::kilo_integration::write_agents_md(&config, &config.project_root) {
@@ -863,13 +863,10 @@ async fn kilo(args: KiloArgs, verbose: bool) -> anyhow::Result<()> {
         KiloAction::Init => {
             let changed = crate::kilo_integration::patch_kilo_indexing(&config)?;
             if changed {
-                println!("✅ Kilo config patched with local Ollama indexing");
+                println!("✅ Kilo config cleaned up: removed unsupported indexing block");
             } else {
-                println!("✅ Kilo config already has local Ollama indexing");
+                println!("✅ Kilo config has no unsupported indexing block");
             }
-            println!("   Indexing provider: ollama");
-            println!("   Embedding model: nomic-embed-text (768 dims)");
-            println!("   Qdrant: http://localhost:{}", config.qdrant_port);
         }
         KiloAction::Status => {
             let status = crate::kilo_integration::verify_kilo_config(&config)?;
@@ -880,24 +877,13 @@ async fn kilo(args: KiloArgs, verbose: bool) -> anyhow::Result<()> {
                 if status.config_exists { "✅" } else { "❌" }
             );
             println!(
-                "Indexing configured: {}",
+                "Indexing block removed: {}",
                 if status.indexing_configured {
                     "✅"
                 } else {
                     "❌"
                 }
             );
-            println!(
-                "Qdrant configured: {}",
-                if status.qdrant_configured {
-                    "✅"
-                } else {
-                    "❌"
-                }
-            );
-            if let Some(url) = &status.ollama_url {
-                println!("Ollama URL: {}", url);
-            }
             if !status.issues.is_empty() {
                 println!("Issues:");
                 for issue in &status.issues {

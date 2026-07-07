@@ -92,15 +92,7 @@ fn test_verify_kilo_config_missing_file() {
 fn test_verify_kilo_config_valid() {
     let tmp = std::env::temp_dir().join("kilo_test_valid.json");
     let content = serde_json::json!({
-        "indexing": {
-            "provider": "ollama",
-            "ollama": { "baseUrl": "http://localhost:11434" },
-            "model": "nomic-embed-text",
-            "dimension": 768,
-            "vectorStore": "qdrant",
-            "enabled": true,
-            "qdrant": { "url": "http://localhost:6333" }
-        }
+        "model": "kilo/kilo-auto/balanced"
     });
     std::fs::write(&tmp, serde_json::to_string(&content).unwrap()).unwrap();
 
@@ -109,17 +101,17 @@ fn test_verify_kilo_config_valid() {
         charm_local_llm::kilo_integration::verify_kilo_config_from_path(&tmp, &config).unwrap();
     assert!(status.config_exists);
     assert!(status.indexing_configured);
-    assert!(status.qdrant_configured);
+    assert!(status.issues.is_empty());
 
     std::fs::remove_file(&tmp).ok();
 }
 
 #[test]
-fn test_verify_kilo_config_wrong_provider() {
-    let tmp = std::env::temp_dir().join("kilo_test_wrong_provider.json");
+fn test_verify_kilo_config_with_invalid_indexing() {
+    let tmp = std::env::temp_dir().join("kilo_test_invalid_indexing.json");
     let content = serde_json::json!({
         "indexing": {
-            "provider": "something-else",
+            "provider": "ollama",
             "ollama": { "baseUrl": "http://localhost:11434" }
         }
     });
@@ -136,10 +128,15 @@ fn test_verify_kilo_config_wrong_provider() {
 }
 
 #[test]
-fn test_patch_kilo_indexing_adds_missing_keys() {
+fn test_patch_kilo_indexing_removes_invalid_block() {
     let tmp = std::env::temp_dir().join("kilo_test_patch.json");
-    let content = "{}";
-    std::fs::write(&tmp, content).unwrap();
+    let content = serde_json::json!({
+        "indexing": {
+            "provider": "ollama",
+            "ollama": { "baseUrl": "http://localhost:11434" }
+        }
+    });
+    std::fs::write(&tmp, serde_json::to_string(&content).unwrap()).unwrap();
 
     let config = Config {
         ollama_port: 11434,
@@ -152,29 +149,7 @@ fn test_patch_kilo_indexing_adds_missing_keys() {
 
     let patched: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&tmp).unwrap()).unwrap();
-    assert_eq!(
-        patched
-            .get("indexing")
-            .and_then(|i| i.get("provider"))
-            .and_then(|p| p.as_str()),
-        Some("ollama")
-    );
-    assert_eq!(
-        patched
-            .get("indexing")
-            .and_then(|i| i.get("ollama"))
-            .and_then(|o| o.get("baseUrl"))
-            .and_then(|u| u.as_str()),
-        Some("http://localhost:11434")
-    );
-    assert_eq!(
-        patched
-            .get("indexing")
-            .and_then(|i| i.get("qdrant"))
-            .and_then(|q| q.get("url"))
-            .and_then(|u| u.as_str()),
-        Some("http://localhost:6333")
-    );
+    assert!(patched.get("indexing").is_none());
 
     std::fs::remove_file(&tmp).ok();
 }

@@ -209,10 +209,10 @@ crush-context: ## Generate CRUSH.md project context file
 # ─── Kilocode ─────────────────────────────────────────────────────────────────
 .PHONY: kilo-init kilo-status kilo-context
 
-kilo-init: ## Patch Kilocode indexing config for Ollama + Qdrant
+kilo-init: ## Remove unsupported indexing block from Kilocode config
 	$(CARGO) run --profile $(PROFILE) -- kilo init
 
-kilo-status: ## Show Kilocode indexing config status
+kilo-status: ## Show Kilocode config status
 	$(CARGO) run --profile $(PROFILE) -- kilo status
 
 kilo-context: ## Generate AGENTS.md project context file

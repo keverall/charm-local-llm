@@ -30,7 +30,7 @@ pub enum Command {
     Qdrant(QdrantArgs),
     /// Manage Crush coding assistant config
     Crush(CrushArgs),
-    /// Manage Kilocode config and indexing
+    /// Manage Kilocode config and context
     Kilo(KiloArgs),
 }
 
@@ -153,7 +153,7 @@ pub struct CrushArgs {
 
 #[derive(Subcommand)]
 pub enum KiloAction {
-    /// Verify and patch ~/.config/kilo/kilo.json for local Ollama indexing
+    /// Remove unsupported indexing block from ~/.config/kilo/kilo.json
     Init,
     /// Show current Kilo config status
     Status,
