@@ -17,6 +17,10 @@ mod tests {
     fn platform_display_roundtrips() {
         assert_eq!(Platform::CachyOS.to_string(), "cachyos");
         assert_eq!(Platform::MacOS.to_string(), "macos");
+        assert_eq!(Platform::MacOSM424Gb.to_string(), "macos-m4-24gb");
+        assert_eq!(Platform::MacOSM432Gb.to_string(), "macos-m4-32gb");
+        assert_eq!(Platform::MacOSM524Gb.to_string(), "macos-m5-24gb");
+        assert_eq!(Platform::MacOSM532Gb.to_string(), "macos-m5-32gb");
         assert_eq!(Platform::Linux.to_string(), "linux");
     }
 

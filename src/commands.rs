@@ -200,7 +200,10 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         .default_models
         .iter()
         .cloned()
-        .map(|m| (m, None))
+        .map(|m| {
+            let mf = get_modfile_for_model(&m, config.platform, &config.modfile_dir);
+            (m, mf)
+        })
         .collect();
 
     if let Some(ref dm) = config.devops_model {
@@ -290,7 +293,7 @@ async fn stop(args: StopArgs, verbose: bool) -> anyhow::Result<()> {
     }
 
     match platform {
-        Platform::MacOS => {
+        p if p.is_macos() => {
             let _ = ProcessCommand::new("pkill").args(["-f", "ollama"]).status();
             std::thread::sleep(Duration::from_secs(2));
             let _ = ProcessCommand::new("pkill")
@@ -733,50 +736,46 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
         return None;
     }
 
-    match platform {
-        Platform::MacOS => {
-            let candidates = vec![
-                format!("modfile-{}", model.replace([':', '.'], "-")),
-                format!(
-                    "modfile-{}",
-                    if model.contains("qwen") {
-                        "qwen-devops"
-                    } else if model.contains("gemma") {
-                        "gemma4"
-                    } else {
-                        model
-                    }
-                ),
-            ];
-            for c in candidates {
-                let p = dir.join(&c);
-                if p.exists() {
-                    return Some(c);
-                }
+    if platform.is_macos() {
+        let candidates: Vec<String> = match model {
+            "qwen3-coder:30b-devops" => vec!["qwen3-coder-30b-devops.modelfile".into()],
+            "qwen2.5-coder:14b-devops" => vec!["qwen2.5-coder-14b-devops.modelfile".into()],
+            "qwen2.5-coder:14b-quick" => vec!["qwen2.5-coder-14b-quick.modelfile".into()],
+            "qwen2.5-coder:7b-quick" => vec!["qwen2.5-coder-7b-quick.modelfile".into()],
+            "nomic-embed-text:latest" | "nomic-embed-text" => {
+                vec!["nomic-embed-text-AppleSilicon.modelfile".into()]
+            }
+            _ => {
+                let base = model.replace([':', '.'], "-");
+                vec![format!("{}.modelfile", base)]
+            }
+        };
+        for c in candidates {
+            let p = dir.join(&c);
+            if p.exists() {
+                return Some(c);
             }
         }
-        Platform::CachyOS | Platform::Linux => {
-            let candidates: Vec<String> = match model {
-                "qwen3-coder:30b-gpu" => vec!["qwen3-coder-30b-gpu.modelfile".into()],
-                "gemma4:26b-devops" => vec!["gemma4-26b-devops.modelfile".into()],
-                "devstral-small-2-gpu" => vec!["devstral-small-2-gpu.modelfile".into()],
-                "qwen3:8b" => vec!["qwen3-8b-gpu.modelfile".into()],
-                "nomic-embed-text:latest" | "nomic-embed-text" => {
-                    vec!["nomic-embed-text-GPU.modelfile".into()]
-                }
-                _ => {
-                    let base = model.replace([':', '.'], "-");
-                    vec![format!("{}.modelfile", base)]
-                }
-            };
-            for c in candidates {
-                let p = dir.join(&c);
-                if p.exists() {
-                    return Some(c);
-                }
+    } else if matches!(platform, Platform::CachyOS | Platform::Linux) {
+        let candidates: Vec<String> = match model {
+            "qwen3-coder:30b-gpu" => vec!["qwen3-coder-30b-gpu.modelfile".into()],
+            "gemma4:26b-devops" => vec!["gemma4-26b-devops.modelfile".into()],
+            "devstral-small-2-gpu" => vec!["devstral-small-2-gpu.modelfile".into()],
+            "qwen3:8b" => vec!["qwen3-8b-gpu.modelfile".into()],
+            "nomic-embed-text:latest" | "nomic-embed-text" => {
+                vec!["nomic-embed-text-GPU.modelfile".into()]
+            }
+            _ => {
+                let base = model.replace([':', '.'], "-");
+                vec![format!("{}.modelfile", base)]
+            }
+        };
+        for c in candidates {
+            let p = dir.join(&c);
+            if p.exists() {
+                return Some(c);
             }
         }
-        _ => {}
     }
 
     None

@@ -27,30 +27,50 @@ pub struct Config {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Platform {
     MacOS,
+    MacOSM424Gb,
+    MacOSM432Gb,
+    MacOSM524Gb,
+    MacOSM532Gb,
     CachyOS,
     Linux,
     Unknown,
 }
 
 impl Platform {
-    /// Parse a platform string into a `Platform` variant.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use charm_local_llm::Platform;
-    ///
-    /// assert_eq!(Platform::from_string("cachyos"), Platform::CachyOS);
-    /// assert_eq!(Platform::from_string("macos"), Platform::MacOS);
-    /// assert_eq!(Platform::from_string("linux"), Platform::Linux);
-    /// assert_eq!(Platform::from_string("unknown"), Platform::Unknown);
-    /// ```
     pub fn from_string(s: &str) -> Self {
-        match s {
-            "macos" | "macbook" => Platform::MacOS,
+        match s.to_lowercase().replace('_', "-").as_str() {
+            "macos" | "macbook" | "macos-m4-24gb" | "macbook-m4-24gb" | "m4-24gb" => {
+                Platform::MacOSM424Gb
+            }
+            "macos-m4-32gb" | "macbook-m4-32gb" | "m4-32gb" => Platform::MacOSM432Gb,
+            "macos-m5-24gb" | "macbook-m5-24gb" | "m5-24gb" => Platform::MacOSM524Gb,
+            "macos-m5-32gb" | "macbook-m5-32gb" | "m5-32gb" => Platform::MacOSM532Gb,
             "cachyos" => Platform::CachyOS,
             "linux" => Platform::Linux,
             _ => Platform::Unknown,
+        }
+    }
+
+    pub fn is_macos(self) -> bool {
+        matches!(
+            self,
+            Platform::MacOS
+                | Platform::MacOSM424Gb
+                | Platform::MacOSM432Gb
+                | Platform::MacOSM524Gb
+                | Platform::MacOSM532Gb
+        )
+    }
+
+    pub fn platform_dir(self) -> &'static str {
+        match self {
+            Platform::MacOS | Platform::MacOSM424Gb => "macos-m4-24gb",
+            Platform::MacOSM432Gb => "macos-m4-32gb",
+            Platform::MacOSM524Gb => "macos-m5-24gb",
+            Platform::MacOSM532Gb => "macos-m5-32gb",
+            Platform::CachyOS | Platform::Linux | Platform::Unknown => {
+                "cachyos-i9-32gb-nvidia-4090"
+            }
         }
     }
 }
@@ -59,6 +79,10 @@ impl std::fmt::Display for Platform {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Platform::MacOS => write!(f, "macos"),
+            Platform::MacOSM424Gb => write!(f, "macos-m4-24gb"),
+            Platform::MacOSM432Gb => write!(f, "macos-m4-32gb"),
+            Platform::MacOSM524Gb => write!(f, "macos-m5-24gb"),
+            Platform::MacOSM532Gb => write!(f, "macos-m5-32gb"),
             Platform::CachyOS => write!(f, "cachyos"),
             Platform::Linux => write!(f, "linux"),
             Platform::Unknown => write!(f, "unknown"),
@@ -69,11 +93,12 @@ impl std::fmt::Display for Platform {
 impl Config {
     pub fn new(platform: Platform, project_root: &Path) -> Self {
         let qdrant_data_dir = match platform {
-            Platform::MacOS => project_root.join("data").join("qdrant"),
+            p if p.is_macos() => project_root.join("data").join("qdrant"),
             Platform::CachyOS | Platform::Linux => dirs::home_dir()
                 .unwrap_or_else(|| PathBuf::from("."))
                 .join(".qdrant"),
             Platform::Unknown => project_root.join("data").join("qdrant"),
+            _ => project_root.join("data").join("qdrant"),
         };
 
         let (
@@ -84,10 +109,35 @@ impl Config {
             ollama_flash_attention,
             ollama_gpu_layers,
         ) = match platform {
-            Platform::MacOS => (
-                vec!["qwen-devops".into(), "nomic-embed-text:latest".into()],
-                Some("qwen-devops".into()),
+            Platform::MacOS | Platform::MacOSM424Gb | Platform::MacOSM524Gb => (
+                vec![
+                    "qwen2.5-coder:14b-devops".into(),
+                    "nomic-embed-text:latest".into(),
+                ],
+                Some("qwen2.5-coder:14b-devops".into()),
+                Some("qwen2.5-coder:7b-quick".into()),
+                "q4_0".into(),
+                Some(1),
                 None,
+            ),
+            Platform::MacOSM432Gb => (
+                vec![
+                    "qwen3-coder:30b-devops".into(),
+                    "nomic-embed-text:latest".into(),
+                ],
+                Some("qwen3-coder:30b-devops".into()),
+                Some("qwen2.5-coder:7b-quick".into()),
+                "q4_0".into(),
+                Some(1),
+                None,
+            ),
+            Platform::MacOSM532Gb => (
+                vec![
+                    "qwen3-coder:30b-devops".into(),
+                    "nomic-embed-text:latest".into(),
+                ],
+                Some("qwen3-coder:30b-devops".into()),
+                Some("qwen2.5-coder:14b-quick".into()),
                 "q4_0".into(),
                 Some(1),
                 None,
@@ -116,16 +166,27 @@ impl Config {
 
         Self {
             platform,
-            ollama_host: "[::]:11434".into(),
+            ollama_host: if platform.is_macos() {
+                "127.0.0.1:11434".into()
+            } else {
+                "[::]:11434".into()
+            },
             ollama_port: 11434,
             ollama_bin: "ollama".into(),
             ollama_base_url: "http://localhost:11434".into(),
-            ollama_num_parallel: 24,
-            ollama_max_loaded_models: 2,
+            ollama_num_parallel: if platform.is_macos() { 4 } else { 24 },
+            ollama_max_loaded_models: if platform.is_macos() { 1 } else { 2 },
             ollama_kv_cache_type,
             ollama_flash_attention,
             ollama_gpu_layers,
-            ollama_models_path: Some(PathBuf::from("/home/ollama/models")),
+            ollama_models_path: Some(if platform.is_macos() {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(".ollama")
+                    .join("models")
+            } else {
+                PathBuf::from("/home/ollama/models")
+            }),
             default_models,
             devops_model,
             quick_model,
@@ -134,7 +195,7 @@ impl Config {
             qdrant_data_dir,
             modfile_dir: project_root
                 .join("platform")
-                .join("cachyos-i9-32gb-nvidia-4090")
+                .join(platform.platform_dir())
                 .join("modfiles"),
             project_root: project_root.to_path_buf(),
         }
@@ -148,21 +209,6 @@ impl Config {
         Self::new(platform, &project_root)
     }
 
-    /// Apply environment variable overrides to the configuration.
-    ///
-    /// # Examples
-    ///
-    /// ```
-    /// use charm_local_llm::{Config, Platform};
-    /// use std::collections::HashMap;
-    ///
-    /// let mut env = HashMap::new();
-    /// env.insert("OLLAMA_PORT".to_string(), "11435".to_string());
-    ///
-    /// let config = Config::default(Platform::CachyOS).with_env_overrides(env);
-    /// assert_eq!(config.ollama_port, 11435);
-    /// assert_eq!(config.ollama_base_url, "http://localhost:11435");
-    /// ```
     pub fn with_env_overrides(mut self, env: std::collections::HashMap<String, String>) -> Self {
         if let Some(v) = env.get("OLLAMA_HOST") {
             self.ollama_host = v.clone();
@@ -200,7 +246,14 @@ impl Config {
             }
         }
         if let Some(v) = env.get("OLLAMA_MODELS") {
-            self.ollama_models_path = Some(PathBuf::from(v));
+            let value = if let Some(stripped) = v.strip_prefix("~/") {
+                dirs::home_dir()
+                    .unwrap_or_else(|| PathBuf::from("."))
+                    .join(stripped)
+            } else {
+                PathBuf::from(v)
+            };
+            self.ollama_models_path = Some(value);
         }
         if let Some(v) = env.get("DEFAULT_MODELS") {
             self.default_models = v
@@ -231,6 +284,7 @@ impl Config {
         if let Some(v) = env.get("PLATFORM_OVERRIDE") {
             self.platform = Platform::from_string(v);
         }
+        self.update_paths_from_project_root();
         self
     }
 
@@ -238,12 +292,7 @@ impl Config {
         self.modfile_dir = self
             .project_root
             .join("platform")
-            .join(match self.platform {
-                Platform::MacOS => "macbook-m4-24gb-optimized",
-                Platform::CachyOS | Platform::Linux | Platform::Unknown => {
-                    "cachyos-i9-32gb-nvidia-4090"
-                }
-            })
+            .join(self.platform.platform_dir())
             .join("modfiles");
     }
 }

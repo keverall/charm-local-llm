@@ -163,3 +163,37 @@ fn test_generate_agents_md_contains_project_info() {
     assert!(md.contains("devstral-small-2-gpu"));
     assert!(md.contains("make build"));
 }
+
+#[test]
+fn test_macos_m4_24gb_defaults_to_14b_devops() {
+    let config = Config::default(Platform::MacOSM424Gb);
+    assert_eq!(
+        config.devops_model.as_deref(),
+        Some("qwen2.5-coder:14b-devops")
+    );
+    assert_eq!(
+        config.quick_model.as_deref(),
+        Some("qwen2.5-coder:7b-quick")
+    );
+    assert!(config
+        .modfile_dir
+        .to_string_lossy()
+        .contains("macos-m4-24gb"));
+}
+
+#[test]
+fn test_macos_m5_32gb_defaults_to_30b_devops() {
+    let config = Config::default(Platform::MacOSM532Gb);
+    assert_eq!(
+        config.devops_model.as_deref(),
+        Some("qwen3-coder:30b-devops")
+    );
+    assert_eq!(
+        config.quick_model.as_deref(),
+        Some("qwen2.5-coder:14b-quick")
+    );
+    assert!(config
+        .modfile_dir
+        .to_string_lossy()
+        .contains("macos-m5-32gb"));
+}

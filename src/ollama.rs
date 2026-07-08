@@ -320,22 +320,21 @@ pub fn start_ollama_direct(config: &Config, log_file: &PathBuf) -> anyhow::Resul
         config.ollama_max_loaded_models.to_string(),
     );
 
-    match config.platform {
-        crate::config::Platform::MacOS => {
-            cmd.env(
-                "OLLAMA_FLASH_ATTENTION",
-                config.ollama_flash_attention.unwrap_or(1).to_string(),
-            );
-            cmd.env("OLLAMA_KV_CACHE_TYPE", &config.ollama_kv_cache_type);
+    if config.platform.is_macos() {
+        cmd.env(
+            "OLLAMA_FLASH_ATTENTION",
+            config.ollama_flash_attention.unwrap_or(1).to_string(),
+        );
+        cmd.env("OLLAMA_KV_CACHE_TYPE", &config.ollama_kv_cache_type);
+    } else if matches!(
+        config.platform,
+        crate::config::Platform::CachyOS | crate::config::Platform::Linux
+    ) {
+        cmd.env("CUDA_VISIBLE_DEVICES", "0");
+        cmd.env("OLLAMA_KV_CACHE_TYPE", &config.ollama_kv_cache_type);
+        if let Some(gpu_layers) = config.ollama_gpu_layers {
+            cmd.env("OLLAMA_GPU_LAYERS", gpu_layers.to_string());
         }
-        crate::config::Platform::CachyOS | crate::config::Platform::Linux => {
-            cmd.env("CUDA_VISIBLE_DEVICES", "0");
-            cmd.env("OLLAMA_KV_CACHE_TYPE", &config.ollama_kv_cache_type);
-            if let Some(gpu_layers) = config.ollama_gpu_layers {
-                cmd.env("OLLAMA_GPU_LAYERS", gpu_layers.to_string());
-            }
-        }
-        _ => {}
     }
 
     if let Some(ref models_path) = config.ollama_models_path {

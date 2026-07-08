@@ -70,7 +70,7 @@ pub fn generate_agents_md(config: &Config) -> String {
     format!(
         r#"# charm-local-llm
 
-Rust CLI that automates setup, optimization, and lifecycle management of local Ollama LLMs on CachyOS with NVIDIA RTX 4090. Generates coding assistant configs for Crush and Kilocode so your entire AI toolchain runs locally.
+Rust CLI that automates setup, optimization, and lifecycle management of local Ollama LLMs on CachyOS RTX 4090 and Apple Silicon MacBooks. Generates coding assistant configs for Crush and Kilocode so your entire AI toolchain runs locally.
 
 ## Project Structure
 
@@ -220,6 +220,10 @@ fn patch_kilo_providers(
             "qwen3:8b": { "name": "Qwen3 8B" },
             "gemma4:26b-devops": { "name": "Gemma 4 26B Devops" },
             "devstral-small-2-gpu": { "name": "Devstral Small 2 GPU" },
+            "qwen2.5-coder:32b-devops": { "name": "Qwen 2.5 Coder 32B DevOps" },
+            "qwen2.5-coder:14b-devops": { "name": "Qwen 2.5 Coder 14B DevOps" },
+            "qwen2.5-coder:14b-quick": { "name": "Qwen 2.5 Coder 14B Quick" },
+            "qwen2.5-coder:7b-quick": { "name": "Qwen 2.5 Coder 7B Quick" },
             "nomic-embed-text": { "name": "Nomic Embed Text" }
         }
     });

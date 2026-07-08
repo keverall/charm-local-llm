@@ -5,16 +5,13 @@ use std::process::Command;
 
 pub fn detect_platform(override_str: Option<&str>) -> Platform {
     if let Some(o) = override_str {
-        return match o.to_lowercase().as_str() {
-            "macos" | "macbook" => Platform::MacOS,
-            "cachyos" => Platform::CachyOS,
-            "linux" => Platform::Linux,
-            _ => Platform::Unknown,
-        };
+        if o != "auto" {
+            return Platform::from_string(o);
+        }
     }
 
     if std::env::consts::OS == "macos" {
-        return Platform::MacOS;
+        return detect_mac_variant();
     }
 
     if std::path::Path::new("/etc/os-release").exists() {
@@ -31,6 +28,64 @@ pub fn detect_platform(override_str: Option<&str>) -> Platform {
     }
 
     Platform::Unknown
+}
+
+fn detect_mac_variant() -> Platform {
+    let chip = detect_apple_silicon_chip();
+    let ram_gb = detect_system_ram_gb();
+
+    match (chip, ram_gb) {
+        (AppleChip::M4, ram) if ram <= 24 => Platform::MacOSM424Gb,
+        (AppleChip::M4, _) => Platform::MacOSM432Gb,
+        (AppleChip::M5, ram) if ram <= 24 => Platform::MacOSM524Gb,
+        (AppleChip::M5, _) => Platform::MacOSM532Gb,
+        (AppleChip::Unknown, ram) if ram <= 24 => Platform::MacOSM424Gb,
+        (AppleChip::Unknown, _) => Platform::MacOSM432Gb,
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AppleChip {
+    M4,
+    M5,
+    Unknown,
+}
+
+fn detect_apple_silicon_chip() -> AppleChip {
+    let Ok(output) = Command::new("sysctl")
+        .args(["-n", "machdep.cpu.brand_string"])
+        .output()
+    else {
+        return AppleChip::Unknown;
+    };
+
+    if !output.status.success() {
+        return AppleChip::Unknown;
+    }
+
+    let brand = String::from_utf8_lossy(&output.stdout).to_lowercase();
+
+    if brand.contains("m5") {
+        AppleChip::M5
+    } else if brand.contains("m4") {
+        AppleChip::M4
+    } else {
+        AppleChip::Unknown
+    }
+}
+
+fn detect_system_ram_gb() -> u64 {
+    let Ok(output) = Command::new("sysctl").args(["-n", "hw.memsize"]).output() else {
+        return 24;
+    };
+
+    if !output.status.success() {
+        return 24;
+    }
+
+    let bytes_str = String::from_utf8_lossy(&output.stdout);
+    let bytes: u64 = bytes_str.trim().parse().unwrap_or(24 * 1024 * 1024 * 1024);
+    bytes / (1024 * 1024 * 1024)
 }
 
 pub fn find_ollama_bin() -> Option<PathBuf> {
@@ -84,17 +139,10 @@ pub fn load_env_file(path: &PathBuf) -> HashMap<String, String> {
 }
 
 pub fn detect_platform_env_path(project_root: &Path, platform: Platform) -> PathBuf {
-    match platform {
-        Platform::MacOS => project_root
-            .join("platform")
-            .join("macbook-m4-24gb-optimized")
-            .join(".env"),
-        Platform::CachyOS | Platform::Linux => project_root
-            .join("platform")
-            .join("cachyos-i9-32gb-nvidia-4090")
-            .join(".env"),
-        Platform::Unknown => project_root.join(".env"),
-    }
+    project_root
+        .join("platform")
+        .join(platform.platform_dir())
+        .join(".env")
 }
 
 pub fn resolve_project_root(override_path: Option<PathBuf>) -> PathBuf {

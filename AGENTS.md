@@ -1,6 +1,6 @@
 # charm-local-llm
 
-Rust CLI that automates setup, optimization, and lifecycle management of local Ollama LLMs on CachyOS with NVIDIA RTX 4090. Generates coding assistant configs for Crush and Kilocode so your entire AI toolchain runs locally.
+Rust CLI that automates setup, optimization, and lifecycle management of local Ollama LLMs on CachyOS RTX 4090 and Apple Silicon MacBooks. Generates coding assistant configs for Crush and Kilocode so your entire AI toolchain runs locally.
 
 ## Project Structure
 
@@ -17,9 +17,11 @@ charm-local-llm/
 │   ├── ollama.rs                Ollama HTTP API client
 │   └── platform.rs              Platform detection + env loading
 ├── platform/
-│   └── cachyos-i9-32gb-nvidia-4090/
-│       ├── .env                 Platform env overrides
-│       └── modfiles/            GPU-optimized model definitions
+│   ├── cachyos-i9-32gb-nvidia-4090/
+│   ├── macos-m4-24gb/
+│   ├── macos-m4-32gb/
+│   ├── macos-m5-24gb/
+│   └── macos-m5-32gb/           Platform env overrides + modfiles
 ├── tests/integration_test.rs
 ├── docker-compose.yml           Qdrant vector DB
 ├── AGENTS.md / CRUSH.md         Auto-generated project context
@@ -34,11 +36,14 @@ charm-local-llm/
 
 ## Local LLM Setup
 
-- **Primary coding model**: `gemma4:26b-devops` (RTX 4090, 24GB VRAM)
-- **Quick model**: `devstral-small-2-gpu`
+- **CachyOS RTX 4090 primary**: `gemma4:26b-devops` / `qwen3-coder:30b-gpu`
+- **MacBook M4/M5 24GB primary**: `qwen2.5-coder:14b-devops`
+- **MacBook M4 32GB primary**: `qwen3-coder:30b-devops`, quick `qwen2.5-coder:7b-quick`
+- **MacBook M5 32GB primary**: `qwen3-coder:30b-devops`, quick `qwen2.5-coder:14b-quick`
 - **Embeddings**: `nomic-embed-text` (768 dims)
 - **Ollama**: <http://localhost:11434>
 - **Qdrant**: <http://localhost:6333>
+- **Specialization**: Terraform, Ansible, YAML, JSON, TypeScript/JS/Node, Go, Python, Rust
 
 ## Crush Integration
 

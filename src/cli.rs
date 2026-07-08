@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 #[derive(Parser)]
 #[command(name = "kcharm")]
-#[command(about = "Setup and optimize KCharm for local Ollama LLMs (CachyOS RTX 4090)", long_about = None)]
+#[command(about = "Setup and optimize KCharm for local Ollama LLMs on CachyOS or Apple Silicon MacBooks", long_about = None)]
 #[command(version = "0.1.0")]
 pub struct Cli {
     #[command(subcommand)]
@@ -40,7 +40,7 @@ pub struct StartArgs {
     #[arg(long)]
     pub dry_run: bool,
 
-    /// Platform override (auto, macos, cachyos, linux)
+    /// Platform override (auto, macos-m4-24gb, macos-m4-32gb, macos-m5-24gb, macos-m5-32gb, cachyos, linux)
     #[arg(long)]
     pub platform_override: Option<String>,
 

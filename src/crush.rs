@@ -102,6 +102,13 @@ pub fn build_crush_config(config: &Config) -> CrushConfig {
         ("gemma4:26b", "Gemma 4 26B"),
         ("devstral-small-2-gpu", "Devstral Small 2 GPU"),
         ("devstral-small-2", "Devstral Small 2"),
+        ("qwen2.5-coder:32b-devops", "Qwen 2.5 Coder 32B DevOps"),
+        ("qwen2.5-coder:14b-devops", "Qwen 2.5 Coder 14B DevOps"),
+        ("qwen2.5-coder:14b-quick", "Qwen 2.5 Coder 14B Quick"),
+        ("qwen2.5-coder:7b-quick", "Qwen 2.5 Coder 7B Quick"),
+        ("qwen2.5-coder:32b", "Qwen 2.5 Coder 32B"),
+        ("qwen2.5-coder:14b", "Qwen 2.5 Coder 14B"),
+        ("qwen2.5-coder:7b", "Qwen 2.5 Coder 7B"),
         ("nomic-embed-text", "Nomic Embed Text"),
         ("nomic-embed-text:latest", "Nomic Embed Text"),
     ];
@@ -270,57 +277,25 @@ pub fn generate_crush_md(config: &Config) -> String {
         .quick_model
         .as_deref()
         .unwrap_or("devstral-small-2-gpu");
-    let platform = &config.platform;
-
     format!(
-        r#"# Project Context
+        r#"# Local Ollama Development Environment
 
-## Environment
+## Primary LLM
 
-- **Platform**: {platform}
-- **Ollama**: <http://localhost:{port}> (local, free, no rate limits)
-- **Primary LLM**: `{devops}` (RTX 4090, 24GB VRAM)
-- **Quick model**: `{quick}`
-- **Vector DB**: Qdrant at <http://localhost:{qdrant_port}>
-- **Embeddings**: `nomic-embed-text` (768 dimensions)
+- **Large/Medium**: `{devops}`
+- **Small/Quick**: `{quick}`
+- **Provider**: Ollama Local at <http://localhost:{port}/v1/>
+- **Embeddings**: `nomic-embed-text`
+- **Qdrant**: <http://localhost:{qdrant}>
 
-## Models Available (GPU-optimized)
+## Specialization
 
-| Model | Purpose | VRAM |
-| --- | --- | --- |
-| `{devops}` | Primary coding, complex reasoning | ~18GB |
-| `{quick}` | Fast responses, simple tasks | ~15GB |
-| `nomic-embed-text` | Embeddings for RAG/search | ~300MB |
-| `gemma4:26b-devops` | Alternative coding model | ~17GB |
-
-## Crush Config
-
-- Config path: `~/.config/crush/crush.json`
-- Provider: `ollama` at <http://localhost:{port}/v1/> with `discover_models: true`
-- **large / medium** → `{devops}` (8192 max tokens)
-- **small** → `{quick}` (4096 max tokens)
-- Context paths: CRUSH.md, AGENTS.md, .clinerules
-
-## Kilocode Indexing
-
-- Config path: `~/.config/kilo/kilo.json`
-- Indexing provider: `ollama` (code search and embeddings only)
-- Embedding model: `nomic-embed-text` (768 dims), vector store: Qdrant
-- Chat models route through Kilo Gateway, not Ollama
-
-## Guidelines
-
-- Prefer local Ollama models for all development tasks
-- Use `{devops}` for complex code generation, architecture, and debugging
-- Use `{quick}` for simple edits, questions, and fast iterations
-- When using local models, data never leaves this machine
-- GPU optimizations are configured for maximum throughput on RTX 4090
+This environment is optimized for DevOps, Terraform, Ansible, YAML, JSON, TypeScript/JavaScript/Node.js, Go, Python, and Rust coding workflows.
 "#,
-        platform = platform,
-        port = config.ollama_port,
         devops = devops,
         quick = quick,
-        qdrant_port = config.qdrant_port,
+        port = config.ollama_port,
+        qdrant = config.qdrant_port,
     )
 }
 
