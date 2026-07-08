@@ -1,5 +1,5 @@
 # =============================================================================
-# charm-local-llm — Rust CLI for Ollama local LLM DevOps (CachyOS RTX 4090)
+# charm-local-llm — Rust CLI for Ollama local LLM DevOps (CachyOS RTX 4090 & Apple Silicon MacBooks)
 # =============================================================================
 # Common tasks for local development and CI/CD.
 #

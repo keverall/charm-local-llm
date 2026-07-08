@@ -1,6 +1,6 @@
 # charm-local-llm
 
-Rust CLI that automates setup, optimization, and lifecycle management of local Ollama LLMs on CachyOS with NVIDIA RTX 4090. Generates coding assistant configs for Crush and Kilocode so your entire AI toolchain runs locally.
+Rust CLI that automates setup, optimization, and lifecycle management of local Ollama LLMs on CachyOS RTX 4090 and Apple Silicon MacBooks. Generates coding assistant configs for Crush and Kilocode so your entire AI toolchain runs locally.
 
 ## Project Structure
 
@@ -18,14 +18,12 @@ charm-local-llm/
 │   ├── ollama.rs                Ollama HTTP API client (models, warmup, create)
 │   └── platform.rs              Platform detection, env loading, GPU checks
 ├── platform/
-│   └── cachyos-i9-32gb-nvidia-4090/
-│       ├── .env                 Platform-specific env overrides
-│       └── modfiles/            GPU-optimized Ollama model definitions
-│           ├── qwen3.6-27b-gpu.modelfile
-│           ├── devstral-small-2-gpu.modelfile
-│           ├── gemma4-26b-devops.modelfile
-│           ├── nomic-embed-text-GPU.modelfile
-│           └── qwen3-8b-gpu.modelfile
+│   ├── cachyos-i9-32gb-nvidia-4090/   Linux + NVIDIA RTX 4090 (24GB VRAM)
+│   ├── macos-m4-24gb/                 Apple Silicon M4 (24GB unified)
+│   ├── macos-m4-32gb/                 Apple Silicon M4 (32GB unified)
+│   ├── macos-m5-24gb/                 Apple Silicon M5 (24GB unified)
+│   └── macos-m5-32gb/                 Apple Silicon M5 (32GB unified)
+│       Each platform dir holds `.env` (env overrides) and `modfiles/` (Ollama definitions)
 ├── tests/
 │   └── integration_test.rs
 ├── .crush/                      Crush TUI local data (DB, logs)
@@ -42,7 +40,7 @@ charm-local-llm/
 
 ## What It Does
 
-- Starts/stops Ollama with GPU-optimized settings (KV cache, parallel requests, CUDA)
+- Starts/stops Ollama with GPU-optimized settings (KV cache, parallel requests, CUDA on Linux / Metal on macOS)
 - Manages local models — pull, ensure from modelfile, remove, warmup
 - Starts Qdrant vector database via docker-compose
 - **Generates Crush config** (`~/.config/crush/crush.json`) for local-first agentic coding
@@ -74,9 +72,12 @@ Also generates `CRUSH.md` in the project root with model info and guidelines for
 
 ## Kilocode Integration
 
-`kcharm start` generates `AGENTS.md` in the project root with project context that Kilocode reads automatically.
+`kcharm start` (and `kcharm kilo init`) writes `AGENTS.md` in the project root with project context that Kilocode reads automatically, and patches `~/.config/kilo/kilo.json`:
 
-Kilo chat models route through the Kilo Gateway. Local Ollama is used for chat model inference via the Gateway when local models are selected.
+- Registers an `Ollama Local (FREE)` provider pointing at the local Ollama endpoint (`http://localhost:11434/v1/`) with known model aliases (including the platform devops/quick models).
+- Removes any unsupported `indexing` block.
+
+Kilocode then runs chat/inference directly against local Ollama — no external gateway, so data stays on-machine.
 
 ## Quick Start
 

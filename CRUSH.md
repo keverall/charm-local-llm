@@ -41,5 +41,5 @@ This environment is optimized for DevOps and software development workflows:
 ## Kilocode Integration
 
 - Config path: `~/.config/kilo/kilo.json`
-- Chat models route through Kilo Gateway
-- Local Ollama used for inference when local models are selected
+- `kcharm` registers an `Ollama Local (FREE)` provider in kilo.json pointing at the local Ollama endpoint, with known model aliases (including the platform devops/quick models).
+- Kilocode runs chat/inference directly against local Ollama — no external gateway, data stays on-machine.

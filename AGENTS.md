@@ -8,6 +8,7 @@ Rust CLI that automates setup, optimization, and lifecycle management of local O
 charm-local-llm/
 ├── src/
 │   ├── main.rs                  Entry point
+│   ├── lib.rs                   Library crate (shared types / re-exports)
 │   ├── cli.rs                   clap CLI definitions
 │   ├── commands.rs              start/stop/status/crush/kilo/etc
 │   ├── config.rs                Config struct + platform defaults
@@ -30,9 +31,9 @@ charm-local-llm/
 
 ## Key Commands
 
-- `charm start` — Start Ollama + models + Qdrant + generate Crush/Kilo configs
-- `charm stop` — Stop everything
-- `charm status` — Show environment status
+- `kcharm start` — Start Ollama + models + Qdrant + generate Crush/Kilo configs
+- `kcharm stop` — Stop everything
+- `kcharm status` — Show environment status
 
 ## Platform Detection
 
@@ -46,7 +47,7 @@ Auto-detected at runtime via `sysctl` (macOS) or `/etc/os-release` (Linux), or o
 | macOS M5 24GB | `macos-m5-24gb` | 24GB unified | `qwen2.5-coder:14b-devops` | `qwen2.5-coder:7b-quick` |
 | macOS M5 32GB | `macos-m5-32gb` | 32GB unified | `qwen3.6:27b-instruct-q4_K_M-devops` | `qwen2.5-coder:14b-quick` |
 
-Override example: `charm start --platform macos-m5-32gb`
+Override example: `kcharm start --platform macos-m5-32gb`
 
 ## Local LLM Setup
 
@@ -61,20 +62,23 @@ Override example: `charm start --platform macos-m5-32gb`
 
 ## Crush Integration
 
-`charm start` generates `~/.config/crush/crush.json`:
+`kcharm start` generates `~/.config/crush/crush.json`:
 
 - **Provider**: `ollama` at <http://localhost:11434/v1/> with `discover_models: true`
-- **large + medium** → `gemma4:26b-devops` (8192 max tokens)
-- **small** → `devstral-small-2-gpu` (4096 max tokens)
+- **large + medium** → platform primary devops model (see table above) — 8192 max tokens
+- **small** → platform quick model (see table above) — 4096 max tokens
 - **Context paths**: CRUSH.md, AGENTS.md, .clinerules
 
 Also generates `CRUSH.md` in the project root as model context for Crush.
 
 ## Kilocode Integration
 
-`charm start` generates `AGENTS.md` in the project root as context for Kilocode.
+`kcharm start` (and `kcharm kilo init`) writes `AGENTS.md` in the project root as context for Kilocode and patches `~/.config/kilo/kilo.json`:
 
-Kilo chat models route through the Kilo Gateway. Local Ollama is used only for chat model inference via the Gateway when local models are selected.
+- Registers an `Ollama Local (FREE)` provider pointing at the local Ollama endpoint (`http://localhost:11434/v1/`) with known model aliases (including the platform devops/quick models).
+- Removes any unsupported `indexing` block.
+
+Kilocode then runs chat/inference directly against local Ollama — no external gateway, so data stays on-machine.
 
 ## Development
 
