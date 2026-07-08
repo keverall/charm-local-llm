@@ -13,16 +13,16 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
-reqwest = { version = "0.12", features = ["json", "blocking"] }
+reqwest = { version = "0.13", features = ["json", "blocking"] }
 tokio = { version = "1.43", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-which = "6.0"
+which = "8.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 dotenv = "0.15"
 regex = "1.11"
-dirs = "5.0"
+dirs = "6.0"
 chrono = "0.4"
 anyhow = "1.0.103"
 thiserror = "2.0.18"

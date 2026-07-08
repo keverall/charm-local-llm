@@ -1,4 +1,4 @@
-FROM qwen3.6:27b-instruct-q4_K_M
+FROM qwen3.6:27b-q4_K_M
 
 #============================================================================
 # Title:            qwen3.6-27b-gpu.modelfile

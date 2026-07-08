@@ -1,95 +1,68 @@
 # =============================================================================
-# charm-local-llm — Rust CLI for Ollama local LLM DevOps (CachyOS RTX 4090 & Apple Silicon MacBooks)
+# charm-local-llm — Rust CLI for Ollama local LLM DevOps
+#   (CachyOS RTX 4090 & Apple Silicon MacBooks)
 # =============================================================================
-# Common tasks for local development and CI/CD.
+# Targets are grouped logically. The real CLI subcommands (start/stop/status/
+# crush/kilo/models/qdrant/...) are provided by `kcharm` itself — invoke them
+# with `make run ARGS="<subcommand> ..."` or call `kcharm` directly.
 #
 # Quick start:
-#   make setup    # Install deps and verify tools
-#   make build    # Compile the project
-#   make test     # Run tests
-#   make lint     # Run clippy + format check + checkmake
-#   make fix      # Auto-fix clippy warnings and format
-#   make ci       # Full CI pipeline (lint + test)
+#   make setup    # toolchain + service checks, build & install kcharm
+#   make build    # compile (debug)
+#   make test     # run all tests
+#   make lint     # clippy + fmt check + checkmake
+#   make fix      # auto-fix clippy + format
+#   make ci       # full CI pipeline
 # =============================================================================
 
 # ─── Configuration ────────────────────────────────────────────────────────────
-CARGO      := cargo
-BIN_NAME   := kcharm
-PROFILE    := dev
+CARGO    := cargo
+BIN_NAME := kcharm
+PROFILE  := dev
 
-# ─── Metadata ─────────────────────────────────────────────────────────────────
+# ─── Help / Metadata ──────────────────────────────────────────────────────────
 .PHONY: help version info
 
 help: ## Show this help message
 	@echo "$(BIN_NAME) — Rust CLI for Ollama local LLM DevOps"
 	@echo ""
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
-		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  %-15s %s\n", $$1, $$2}'
 	@echo ""
+	@echo "Run the CLI directly: make run ARGS=\"start\"   (or: kcharm start)"
 
 version: ## Print version from Cargo.toml
 	@$(CARGO) metadata --format-version 1 --no-deps --quiet | \
 		grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4
 
-info: ## Print project info
-	@echo "Project:   $(BIN_NAME)"
-	@echo "Rust:     $$(rustc --version)"
-	@echo "Cargo:    $$(cargo --version)"
-	@echo "Profile:  $(PROFILE)"
+info: ## Print project + toolchain info
+	@echo "Project: $(BIN_NAME)"
+	@echo "Rust:    $$(rustc --version)"
+	@echo "Cargo:   $$(cargo --version)"
+	@echo "Profile: $(PROFILE)"
 
-# ─── Dependency Setup ──────────────────────────────────────────────────────────
-.PHONY: setup check-deps setup-tools setup-checkmake setup-ollama setup-docker setup-install setup-fish setup-powershell install
+# ─── Setup ────────────────────────────────────────────────────────────────────
+# Installs the Rust toolchain components, verifies (does not install) the
+# runtime services Ollama + Docker, then builds and installs kcharm.
+.PHONY: setup install setup-checks
 
-setup: check-deps setup-tools setup-checkmake setup-ollama setup-docker setup-install ## Install deps, build, and install kcharm
-	@echo "[setup] Done. Run 'kcharm start' or 'make run-start'"
-
-setup-tools: ## Ensure Rust toolchain, rustfmt, and clippy
-	@rustc --version >/dev/null 2>&1 || (echo "[error] rustc not found. Install from https://rustup.rs" && exit 1)
+setup: ## Install toolchain, verify services, build & install kcharm
+	@command -v $(CARGO) >/dev/null 2>&1 || { echo "[error] cargo not found — install from https://rustup.rs"; exit 1; }
 	@rustup component add rustfmt clippy 2>/dev/null || true
-	@echo "[setup] rustfmt + clippy ready"
+	@$(MAKE) setup-checks
+	@$(MAKE) install
+	@echo "[setup] Done. Run 'kcharm start' or 'make run ARGS=start'."
 
-setup-checkmake: ## Install checkmake if missing
-	@command -v checkmake >/dev/null 2>&1 && echo "[setup] checkmake found" || \
-		(echo "[setup] Installing checkmake..." && \
-		 go install github.com/mrtazz/checkmake/cmd/checkmake@latest 2>/dev/null || \
-		 echo "[warn] checkmake not installed — https://github.com/mrtazz/checkmake/releases")
+# Internal: verify service prerequisites (warns, never installs them).
+setup-checks:
+	@command -v checkmake >/dev/null 2>&1 && echo "[setup] checkmake found" || (echo "[setup] Installing checkmake..." && go install github.com/mrtazz/checkmake/cmd/checkmake@latest 2>/dev/null || echo "[warn] checkmake skipped — https://github.com/mrtazz/checkmake/releases")
+	@command -v ollama >/dev/null 2>&1 && echo "[setup] Ollama found: $$(ollama --version)" || echo "[warn] Ollama not found — install from https://ollama.com (required by 'kcharm start')"
+	@command -v docker >/dev/null 2>&1 && echo "[setup] Docker found: $$(docker --version)" || echo "[warn] Docker not found — required for Qdrant"
 
-setup-ollama: ## Check Ollama installation
-	@command -v ollama >/dev/null 2>&1 && echo "[setup] Ollama found: $$(ollama --version)" || \
-		echo "[warn] Ollama not found — install from https://ollama.com"
-
-setup-docker: ## Check Docker and docker-compose
-	@command -v docker >/dev/null 2>&1 && echo "[setup] Docker found: $$(docker --version)" || \
-		echo "[warn] Docker not found — Qdrant requires Docker"
-	@command -v docker-compose >/dev/null 2>&1 && echo "[setup] docker-compose found" || \
-		echo "[warn] docker-compose not found — Qdrant requires docker-compose"
-
-setup-install: ## Build and install kcharm to ~/.local/bin
-	@$(MAKE) build
+install: build ## Build and install kcharm to ~/.local/bin
 	@mkdir -p ~/.local/bin
 	@cp target/debug/$(BIN_NAME) ~/.local/bin/$(BIN_NAME)
-	@echo "[setup] Installed $(BIN_NAME) to ~/.local/bin/"
-	@echo "Add to PATH: Fish: set -U fish_user_paths ~/.local/bin \$$fish_user_paths"
-
-setup-fish: ## Add kcharm to fish PATH
-	@mkdir -p ~/.local/bin
-	@$(MAKE) build
-	@cp target/debug/$(BIN_NAME) ~/.local/bin/$(BIN_NAME)
-	@fish -c "set -U fish_user_paths ~/.local/bin \$$fish_user_paths" 2>/dev/null || \
-		echo "[setup] kcharm installed. Restart fish or run: set -U fish_user_paths ~/.local/bin \$$fish_user_paths"
-
-setup-powershell: ## Add kcharm to PowerShell PATH
-	@mkdir -p ~/.local/bin
-	@$(MAKE) build
-	@cp target/debug/$(BIN_NAME) ~/.local/bin/$(BIN_NAME)
-	@echo "[setup] kcharm installed to ~/.local/bin/"
-	@echo "PowerShell: [Environment]::SetEnvironmentVariable('PATH', \$$env:PATH + ';\$$HOME\.local\bin', 'User')"
-
-check-deps:
-	@if ! command -v $(CARGO) >/dev/null 2>&1; then \
-		echo "[error] Rust/cargo not found. Install from https://rustup.rs"; \
-		exit 1; \
-	fi
+	@echo "[install] $(BIN_NAME) -> ~/.local/bin/$(BIN_NAME)"
+	@echo "PATH: bash/zsh export PATH=\"\$$HOME/.local/bin:\$$PATH\" | fish set -U fish_user_paths \$$HOME/.local/bin \$$fish_user_paths | pwsh [Environment]::SetEnvironmentVariable('PATH', \$$env:PATH + ';\$$HOME\.local\bin', 'User')"
 
 # ─── Build ────────────────────────────────────────────────────────────────────
 .PHONY: build build-release build-check
@@ -100,11 +73,11 @@ build: ## Compile the project (debug profile)
 build-release: ## Compile the project (release profile)
 	$(CARGO) build --release
 
-build-check: ## Type-check without building
+build-check: ## Type-check without emitting binaries
 	$(CARGO) check --profile $(PROFILE)
 
-# ─── Testing ──────────────────────────────────────────────────────────────────
-.PHONY: test test-unit test-integration test-ci
+# ─── Test ─────────────────────────────────────────────────────────────────────
+.PHONY: test test-unit test-integration
 
 test: ## Run all tests (unit + integration)
 	$(CARGO) test --profile $(PROFILE)
@@ -115,38 +88,28 @@ test-unit: ## Run unit tests only
 test-integration: ## Run integration tests only
 	$(CARGO) test --test '*' --profile $(PROFILE)
 
-test-ci: test ## Run tests in CI mode
-	$(CARGO) test --profile $(PROFILE) --quiet
+# ─── Lint ─────────────────────────────────────────────────────────────────────
+.PHONY: lint lint-clippy lint-fmt lint-checkmake
 
-# ─── Linting ──────────────────────────────────────────────────────────────────
-.PHONY: lint lint-clippy lint-fmt lint-ci lint-checkmake
+lint: lint-clippy lint-fmt lint-checkmake ## Run all linters (clippy + fmt + makefile)
 
-lint: lint-clippy lint-fmt lint-checkmake ## Run all linters (clippy + format check + makefile)
-
-lint-clippy: ## Run clippy with strict warnings
+lint-clippy: ## Run clippy, denying warnings
 	$(CARGO) clippy --all-targets --all-features --profile $(PROFILE) -- -D warnings
 
 lint-fmt: ## Check code formatting (read-only)
 	$(CARGO) fmt -- --check
 
-lint-ci: ## CI-only lint (no output unless it fails)
-	$(CARGO) clippy --all-targets --all-features --profile $(PROFILE) -q -- -D warnings
-	$(CARGO) fmt -- --check -q
-
-lint-checkmake: ## Lint Makefile with checkmake
+lint-checkmake: ## Lint this Makefile with checkmake
 	@command -v checkmake >/dev/null 2>&1 && checkmake ./Makefile || echo "[warn] checkmake not installed — skipping Makefile lint"
 
-# ─── Formatting ───────────────────────────────────────────────────────────────
-.PHONY: fmt fmt-check
+# ─── Format / Auto-Fix ───────────────────────────────────────────────────────
+.PHONY: fmt fmt-check fix fix-clippy fix-fmt
 
 fmt: ## Auto-format code with rustfmt
 	$(CARGO) fmt
 
 fmt-check: ## Check formatting without modifying files
 	$(CARGO) fmt -- --check
-
-# ─── Auto-Fix ─────────────────────────────────────────────────────────────────
-.PHONY: fix fix-clippy fix-fmt
 
 fix: fix-clippy fix-fmt ## Apply all automated fixes (clippy + format)
 
@@ -159,75 +122,32 @@ fix-fmt: ## Auto-format code
 # ─── Dependencies ─────────────────────────────────────────────────────────────
 .PHONY: deps deps-update deps-check
 
-deps: ## Show dependency tree
-	$(CARGO) tree --profile $(PROFILE)
+deps: ## Write dependency tree to deps.txt
+	$(CARGO) tree > deps.txt
+	@echo "[deps] Dependency tree written to deps.txt"
 
-deps-update: ## Update dependencies to latest compatible versions
+deps-update: ## Update deps to latest compatible versions
 	$(CARGO) update
+	@command -v cargo-outdated >/dev/null 2>&1 && { $(CARGO) outdated > deps-outdated.txt; echo "[deps-update] Compatible deps updated; any major updates written to deps-outdated.txt (edit Cargo.toml to apply)"; } || \
+		echo "[deps-update] Compatible deps updated. Run 'make deps-check' to see major updates."
 
-deps-check: ## Check for outdated dependencies
-	$(CARGO) outdated || echo "[warn] cargo-outdated not installed — cargo install cargo-outdated"
+deps-check: ## Write outdated-dependency report to deps-outdated.txt
+	@command -v cargo-outdated >/dev/null 2>&1 && { $(CARGO) outdated > deps-outdated.txt; echo "[deps-check] Report written to deps-outdated.txt"; } || \
+		echo "[warn] cargo-outdated not installed — run 'cargo install cargo-outdated' (one-time, compiles from source) to enable"
 
 # ─── Run ──────────────────────────────────────────────────────────────────────
-.PHONY: run run-start run-stop run-status run-service run-models run-qdrant
+.PHONY: run
 
-run: ## Run the CLI: make run ARGS="start"
+run: ## Run the CLI: make run ARGS="start --platform-override cachyos"
 	$(CARGO) run --profile $(PROFILE) -- $(ARGS)
 
-run-start: ## Start Ollama environment (generates Crush + Kilo config)
-	$(CARGO) run --profile $(PROFILE) -- start
-
-run-stop: ## Stop Ollama environment
-	$(CARGO) run --profile $(PROFILE) -- stop
-
-run-status: ## Show environment status
-	$(CARGO) run --profile $(PROFILE) -- status
-
-run-service: ## Manage Ollama systemd service
-	$(CARGO) run --profile $(PROFILE) -- service $(ARGS)
-
-run-models: ## Manage models
-	$(CARGO) run --profile $(PROFILE) -- models $(ARGS)
-
-run-qdrant: ## Manage Qdrant container
-	$(CARGO) run --profile $(PROFILE) -- qdrant $(ARGS)
-
-install: setup-install ## Build and install kcharm to ~/.local/bin
-
-# ─── Crusher (Crush) ─────────────────────────────────────────────────────────
-.PHONY: crush-init crush-status crush-context
-
-crush-init: ## Generate Crush config for Ollama on ~/.config/crush/crush.json
-	$(CARGO) run --profile $(PROFILE) -- crush init
-
-crush-status: ## Show Crush config status
-	$(CARGO) run --profile $(PROFILE) -- crush status
-
-crush-context: ## Generate CRUSH.md project context file
-	$(CARGO) run --profile $(PROFILE) -- crush context
-
-# ─── Kilocode ─────────────────────────────────────────────────────────────────
-.PHONY: kilo-init kilo-status kilo-context
-
-kilo-init: ## Remove unsupported indexing block from Kilocode config
-	$(CARGO) run --profile $(PROFILE) -- kilo init
-
-kilo-status: ## Show Kilocode config status
-	$(CARGO) run --profile $(PROFILE) -- kilo status
-
-kilo-context: ## Generate AGENTS.md project context file
-	$(CARGO) run --profile $(PROFILE) -- kilo context
-
 # ─── Cleanup ──────────────────────────────────────────────────────────────────
-.PHONY: clean clean-all clean-target
+.PHONY: clean clean-all
 
-clean: ## Remove build artifacts
+clean: ## Remove build artifacts (cargo clean)
 	$(CARGO) clean
 
-clean-all: clean ## Remove build artifacts and target directory
-	rm -rf target/
-
-clean-target: ## Remove target directory only
+clean-all: clean ## Also remove the target directory
 	rm -rf target/
 
 # ─── CI / Aggregates ──────────────────────────────────────────────────────────
@@ -235,7 +155,10 @@ clean-target: ## Remove target directory only
 
 all: lint test ## Run lint and tests
 
-ci: lint-ci test-ci ## Run full CI pipeline
+ci: ## Full CI pipeline (quiet lint + tests)
+	$(CARGO) clippy --all-targets --all-features --profile $(PROFILE) -q -- -D warnings
+	$(CARGO) fmt -- --check -q
+	$(CARGO) test --profile $(PROFILE) --quiet
 
 pre-commit: fmt-check lint-clippy test-unit ## Run pre-commit checks locally
 

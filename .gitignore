@@ -52,5 +52,9 @@
 # rustfmt output
 /rustfmt.toml
 
+# Generated dependency tree
+/deps.txt
+/deps-outdated.txt
+
 # Other Rust-specific files
 .DS_Store

@@ -51,10 +51,10 @@ Override example: `kcharm start --platform macos-m5-32gb`
 
 ## Local LLM Setup
 
-- **Current platform**: Auto-detected or overridden via `--platform`
-- **Memory/GPU**: Platform-specific (see table above)
-- **Primary coding model**: Platform-specific (see table above)
-- **Quick model**: Platform-specific (see table above)
+- **Current platform**: `cachyos` (`cachyos-i9-32gb-nvidia-4090`)
+- **Memory/GPU**: NVIDIA RTX 4090 (24GB VRAM)
+- **Primary coding model**: `qwen3.6:27b-instruct-q4_K_M-gpu`
+- **Quick model**: `devstral-small-2-gpu`
 - **Embeddings**: `nomic-embed-text` (768 dims)
 - **Ollama**: <http://localhost:11434>
 - **Qdrant**: <http://localhost:6333>
@@ -65,8 +65,8 @@ Override example: `kcharm start --platform macos-m5-32gb`
 `kcharm start` generates `~/.config/crush/crush.json`:
 
 - **Provider**: `ollama` at <http://localhost:11434/v1/> with `discover_models: true`
-- **large + medium** → platform primary devops model (see table above) — 8192 max tokens
-- **small** → platform quick model (see table above) — 4096 max tokens
+- **large + medium** → `qwen3.6:27b-instruct-q4_K_M-gpu` (8192 max tokens)
+- **small** → `devstral-small-2-gpu` (4096 max tokens)
 - **Context paths**: CRUSH.md, AGENTS.md, .clinerules
 
 Also generates `CRUSH.md` in the project root as model context for Crush.
