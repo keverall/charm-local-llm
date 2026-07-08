@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: "cargo"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    # Cross major versions (e.g. reqwest 0.12 -> 0.13, dirs 5 -> 6): bump the
+    # manifest requirement to the new major rather than staying in-range.
+    versioning-strategy: increase
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    assignees:
+      - "keverall"
+    reviewers:
+      - "keverall"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
+    groups:
+      cargo-dependencies:
+        patterns:
+          - "*"
