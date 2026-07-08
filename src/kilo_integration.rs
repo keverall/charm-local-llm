@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::Platform;
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
@@ -66,6 +67,22 @@ pub fn generate_agents_md(config: &Config) -> String {
         .quick_model
         .as_deref()
         .unwrap_or("devstral-small-2-gpu");
+    let platform = config.platform;
+    let platform_dir = platform.platform_dir();
+
+    let memory_desc = if platform.is_macos() {
+        match platform {
+            Platform::MacOSM424Gb | Platform::MacOSM524Gb => {
+                "Apple Silicon unified memory (24GB shared CPU/GPU)"
+            }
+            Platform::MacOSM432Gb | Platform::MacOSM532Gb => {
+                "Apple Silicon unified memory (32GB shared CPU/GPU)"
+            }
+            _ => "Apple Silicon unified memory",
+        }
+    } else {
+        "NVIDIA RTX 4090 (24GB VRAM)"
+    };
 
     format!(
         r#"# charm-local-llm
@@ -87,9 +104,11 @@ charm-local-llm/
 │   ├── ollama.rs                Ollama HTTP API client
 │   └── platform.rs              Platform detection + env loading
 ├── platform/
-│   └── cachyos-i9-32gb-nvidia-4090/
-│       ├── .env                 Platform env overrides
-│       └── modfiles/            GPU-optimized model definitions
+│   ├── cachyos-i9-32gb-nvidia-4090/
+│   ├── macos-m4-24gb/
+│   ├── macos-m4-32gb/
+│   ├── macos-m5-24gb/
+│   └── macos-m5-32gb/           Platform env overrides + modfiles
 ├── tests/integration_test.rs
 ├── docker-compose.yml           Qdrant vector DB
 ├── AGENTS.md / CRUSH.md         Auto-generated project context
@@ -102,13 +121,30 @@ charm-local-llm/
 - `charm stop` — Stop everything
 - `charm status` — Show environment status
 
+## Platform Detection
+
+Auto-detected at runtime via `sysctl` (macOS) or `/etc/os-release` (Linux), or override with `--platform`:
+
+| Platform | Directory | Memory/GPU | Primary Model | Quick Model |
+|----------|-----------|------------|---------------|-------------|
+| CachyOS RTX 4090 | `cachyos-i9-32gb-nvidia-4090` | 24GB VRAM | `qwen3-coder:30b-gpu` | `devstral-small-2-gpu` |
+| macOS M4 24GB | `macos-m4-24gb` | 24GB unified | `qwen2.5-coder:14b-devops` | `qwen2.5-coder:7b-quick` |
+| macOS M4 32GB | `macos-m4-32gb` | 32GB unified | `qwen3-coder:30b-devops` | `qwen2.5-coder:7b-quick` |
+| macOS M5 24GB | `macos-m5-24gb` | 24GB unified | `qwen2.5-coder:14b-devops` | `qwen2.5-coder:7b-quick` |
+| macOS M5 32GB | `macos-m5-32gb` | 32GB unified | `qwen3-coder:30b-devops` | `qwen2.5-coder:14b-quick` |
+
+Override example: `charm start --platform macos-m5-32gb`
+
 ## Local LLM Setup
 
-- **Primary coding model**: `{devops}` (RTX 4090, 24GB VRAM)
+- **Current platform**: `{platform}` (`{platform_dir}`)
+- **Memory/GPU**: {memory_desc}
+- **Primary coding model**: `{devops}`
 - **Quick model**: `{quick}`
 - **Embeddings**: `nomic-embed-text` (768 dims)
 - **Ollama**: <http://localhost:{port}>
 - **Qdrant**: <http://localhost:{qdrant}>
+- **Specialization**: Terraform, Ansible, YAML, JSON, TypeScript/JS/Node, Go, Python, Rust
 
 ## Crush Integration
 
@@ -151,6 +187,9 @@ make setup     # install dependencies
 - AGENTS.md: project root context for Kilocode (auto-generated)
 - CRUSH.md: project root context for Crush (auto-generated)
 "#,
+        platform = platform,
+        platform_dir = platform_dir,
+        memory_desc = memory_desc,
         devops = devops,
         quick = quick,
         port = config.ollama_port,
@@ -216,11 +255,11 @@ fn patch_kilo_providers(
         },
         "models": {
             "qwen3-coder:30b-gpu": { "name": "Qwen3 Coder 30B GPU" },
+            "qwen3-coder:30b-devops": { "name": "Qwen3 Coder 30B DevOps" },
             "qwen3-coder:30b": { "name": "Qwen3 Coder 30B" },
             "qwen3:8b": { "name": "Qwen3 8B" },
             "gemma4:26b-devops": { "name": "Gemma 4 26B Devops" },
             "devstral-small-2-gpu": { "name": "Devstral Small 2 GPU" },
-            "qwen2.5-coder:32b-devops": { "name": "Qwen 2.5 Coder 32B DevOps" },
             "qwen2.5-coder:14b-devops": { "name": "Qwen 2.5 Coder 14B DevOps" },
             "qwen2.5-coder:14b-quick": { "name": "Qwen 2.5 Coder 14B Quick" },
             "qwen2.5-coder:7b-quick": { "name": "Qwen 2.5 Coder 7B Quick" },

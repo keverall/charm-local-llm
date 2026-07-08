@@ -34,12 +34,26 @@ charm-local-llm/
 - `charm stop` — Stop everything
 - `charm status` — Show environment status
 
+## Platform Detection
+
+Auto-detected at runtime via `sysctl` (macOS) or `/etc/os-release` (Linux), or override with `--platform`:
+
+| Platform | Directory | Memory/GPU | Primary Model | Quick Model |
+|----------|-----------|------------|---------------|-------------|
+| CachyOS RTX 4090 | `cachyos-i9-32gb-nvidia-4090` | 24GB VRAM | `qwen3-coder:30b-gpu` | `devstral-small-2-gpu` |
+| macOS M4 24GB | `macos-m4-24gb` | 24GB unified | `qwen2.5-coder:14b-devops` | `qwen2.5-coder:7b-quick` |
+| macOS M4 32GB | `macos-m4-32gb` | 32GB unified | `qwen3-coder:30b-devops` | `qwen2.5-coder:7b-quick` |
+| macOS M5 24GB | `macos-m5-24gb` | 24GB unified | `qwen2.5-coder:14b-devops` | `qwen2.5-coder:7b-quick` |
+| macOS M5 32GB | `macos-m5-32gb` | 32GB unified | `qwen3-coder:30b-devops` | `qwen2.5-coder:14b-quick` |
+
+Override example: `charm start --platform macos-m5-32gb`
+
 ## Local LLM Setup
 
-- **CachyOS RTX 4090 primary**: `gemma4:26b-devops` / `qwen3-coder:30b-gpu`
-- **MacBook M4/M5 24GB primary**: `qwen2.5-coder:14b-devops`
-- **MacBook M4 32GB primary**: `qwen3-coder:30b-devops`, quick `qwen2.5-coder:7b-quick`
-- **MacBook M5 32GB primary**: `qwen3-coder:30b-devops`, quick `qwen2.5-coder:14b-quick`
+- **Current platform**: Auto-detected or overridden via `--platform`
+- **Memory/GPU**: Platform-specific (see table above)
+- **Primary coding model**: Platform-specific (see table above)
+- **Quick model**: Platform-specific (see table above)
 - **Embeddings**: `nomic-embed-text` (768 dims)
 - **Ollama**: <http://localhost:11434>
 - **Qdrant**: <http://localhost:6333>
