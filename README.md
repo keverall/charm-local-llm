@@ -23,7 +23,11 @@ charm-local-llm/
 │   ├── macos-m4-32gb/                 Apple Silicon M4 (32GB unified)
 │   ├── macos-m5-24gb/                 Apple Silicon M5 (24GB unified)
 │   └── macos-m5-32gb/                 Apple Silicon M5 (32GB unified)
-│       Each platform dir holds `.env` (env overrides) and `modfiles/` (Ollama definitions)
+│       Each platform dir holds `.env` (env overrides, gitignored) and `.env.example`
+│       (tracked template) and `modfiles/` (Ollama definitions).
+│       Copy the example to a real `.env` for your platform before running:
+│       `cp platform/<your-platform>/.env.example platform/<your-platform>/.env`
+│       (the `.env` is gitignored so local overrides are never committed or lost on clone).
 ├── tests/
 │   └── integration_test.rs
 ├── .crush/                      Crush TUI local data (DB, logs)
