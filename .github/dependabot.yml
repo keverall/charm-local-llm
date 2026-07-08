@@ -21,3 +21,18 @@ updates:
       cargo-dependencies:
         patterns:
           - "*"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+    assignees:
+      - "keverall"
+    reviewers:
+      - "keverall"
+    commit-message:
+      prefix: "chore"
+      include: "scope"
