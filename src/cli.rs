@@ -73,7 +73,7 @@ pub enum ModelsAction {
     List,
     /// Ensure a model is present (pull or create from modelfile)
     Ensure {
-        /// Model name (e.g. qwen3-coder:30b-gpu)
+        /// Model name (e.g. qwen3.6:27b-instruct-q4_K_M-gpu)
         model: String,
     },
     /// Remove a model

@@ -21,7 +21,7 @@ charm-local-llm/
 │   └── cachyos-i9-32gb-nvidia-4090/
 │       ├── .env                 Platform-specific env overrides
 │       └── modfiles/            GPU-optimized Ollama model definitions
-│           ├── qwen3-coder-30b-gpu.modelfile
+│           ├── qwen3.6-27b-gpu.modelfile
 │           ├── devstral-small-2-gpu.modelfile
 │           ├── gemma4-26b-devops.modelfile
 │           ├── nomic-embed-text-GPU.modelfile
@@ -54,7 +54,7 @@ charm-local-llm/
 
 | Model | Role | VRAM |
 | ------- | ------ | ------ |
-| `qwen3-coder:30b-gpu` | Primary — coding, complex reasoning | ~18GB |
+| `qwen3.6:27b-instruct-q4_K_M-gpu` | Primary — coding, complex reasoning | ~18GB |
 | `qwen3:8b` | Lightweight general-purpose (newest Qwen3 arch) | ~5GB |
 | `devstral-small-2-gpu` | Quick — fast responses, simple tasks | ~15GB |
 | `nomic-embed-text` | Embeddings for semantic search (768 dims) | ~300MB |
@@ -65,7 +65,7 @@ charm-local-llm/
 `kcharm start` generates `~/.config/crush/crush.json`:
 
 - **Provider**: `ollama` at `http://localhost:11434/v1/` with `discover_models: true`
-- **large + medium slots** → `qwen3-coder:30b-gpu` (8192 max tokens)
+- **large + medium slots** → `qwen3.6:27b-instruct-q4_K_M-gpu` (8192 max tokens)
 - **small slot** → `devstral-small-2-gpu` (4096 max tokens)
 - **Context paths**: `CRUSH.md`, `AGENTS.md`, `.clinerules`
 - **Permissions**: bash, view, edit, write, glob, grep
@@ -122,7 +122,7 @@ kcharm kilo status                    # Show Kilo config status
 kcharm kilo context                   # Generate AGENTS.md
 
 kcharm models list                    # List installed models
-kcharm models ensure qwen3-coder:30b-gpu  # Ensure model exists
+kcharm models ensure qwen3.6:27b-instruct-q4_K_M-gpu  # Ensure model exists
 kcharm models remove old-model        # Remove model
 
 kcharm service start|stop|restart|status

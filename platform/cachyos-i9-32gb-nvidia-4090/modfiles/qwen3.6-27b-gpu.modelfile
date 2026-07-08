@@ -1,0 +1,42 @@
+FROM qwen3.6:27b-instruct-q4_K_M
+
+#============================================================================
+# Title:            qwen3.6-27b-gpu.modelfile
+# Description:      Hardware-optimized modfile for Qwen 3.6 27B DevOps Configuration on RTX 4090
+# Author:           K Everall
+# Hardware:         RTX 4090 (24GB GDDR6X) & CachyOS Linux (32GB DDR5)
+# Optimized for: Kilocode, charm-local-llm, and Agentic Repo Processing
+#============================================================================
+
+#----------------------------------------------------------------------------
+# 1. Hardware Execution & Compute Pipeline
+#----------------------------------------------------------------------------
+PARAMETER num_gpu -1             # Auto calculate model layers onto ultra-fast VRAM
+PARAMETER num_batch 512          # High prompt ingestion batch size for fast repo reads
+PARAMETER num_thread 24          # Aligned to Intel i9 Performance Cores (bypasses slow E-cores)
+
+#----------------------------------------------------------------------------
+# 2. Context Window & Working Footprint 
+#----------------------------------------------------------------------------
+PARAMETER num_ctx 32768          # 32k context boundary (ideal safely-scaled sandbox)
+PARAMETER num_predict 4096       # Generates deep multiline logic sequences without clipping
+
+#----------------------------------------------------------------------------
+# 3. Determinism & Output Quality (Regulated DevOps / Financial Infrastructure)
+#----------------------------------------------------------------------------
+PARAMETER temperature 0.0        # Strict zero-variance mode; completely forces predictability
+PARAMETER top_p 0.9              # High token quality bounds
+PARAMETER stop "<|im_start|>"    # Explicit structural layout constraint bounds
+PARAMETER stop "<|im_end|>"      # Prevent runaway loop tokens in code blocks
+
+#----------------------------------------------------------------------------
+# 4. Agentic Engineering System Template
+#----------------------------------------------------------------------------
+SYSTEM """You are the local Kilocode DevOps Engineer powered by Qwen 3.6 (27B).
+You run natively on an optimized CachyOS Linux single-GPU instance.
+Your core operational boundaries:
+1. INFRASTRUCTURE & SYSTEMS: Write syntactically perfect and secure PowerShell 7 Core scripts, Pester v5 testing frameworks, multi-stage Dockerfiles, Makefiles, and valid raw JSON matrix files. Specialize in heavy professional DevOps tasks for regulated EU EMIR banking corporate environments.
+You provide secure, compliant, infrastructure-as-code (Terraform, K8s, Python, Go, Rust, Typescript/JS/Node) with strict adherence to data sovereignty and financial regulations. Provide accurate, helpful, and concise responses
+2. CONTEXT CONSTRAINTS: Be aware that you are parsing active files in a local Git repository workspace. Avoid rambling or introducing conversational fluff. Write tight, modular, error-handled code immediately. Update documentation inline with changes and update tests to cover added new or changed functionality, removing tests where no longer required as functionality removed or changed.
+3. LOGIC PRESERVATION: Retain strict internal reasoning consistency across consecutive automated step calls. 
+4. DEPLOYMENT GOAL: Output raw terminal commands and source structures targeted directly for zero-downtime banking, automation, and enterprise infrastructure deployments."""

@@ -122,10 +122,10 @@ impl Config {
             ),
             Platform::MacOSM432Gb => (
                 vec![
-                    "qwen3-coder:30b-devops".into(),
+                    "qwen3.6:27b-instruct-q4_K_M-devops".into(),
                     "nomic-embed-text:latest".into(),
                 ],
-                Some("qwen3-coder:30b-devops".into()),
+                Some("qwen3.6:27b-instruct-q4_K_M-devops".into()),
                 Some("qwen2.5-coder:7b-quick".into()),
                 "q4_0".into(),
                 Some(1),
@@ -133,10 +133,10 @@ impl Config {
             ),
             Platform::MacOSM532Gb => (
                 vec![
-                    "qwen3-coder:30b-devops".into(),
+                    "qwen3.6:27b-instruct-q4_K_M-devops".into(),
                     "nomic-embed-text:latest".into(),
                 ],
-                Some("qwen3-coder:30b-devops".into()),
+                Some("qwen3.6:27b-instruct-q4_K_M-devops".into()),
                 Some("qwen2.5-coder:14b-quick".into()),
                 "q4_0".into(),
                 Some(1),
@@ -144,18 +144,18 @@ impl Config {
             ),
             Platform::CachyOS | Platform::Linux => (
                 vec![
-                    "qwen3-coder:30b-gpu".into(),
+                    "qwen3.6:27b-instruct-q4_K_M-gpu".into(),
                     "qwen3:8b".into(),
                     "nomic-embed-text:latest".into(),
                 ],
-                Some("qwen3-coder:30b-gpu".into()),
+                Some("qwen3.6:27b-instruct-q4_K_M-gpu".into()),
                 Some("devstral-small-2-gpu".into()),
                 "q4_0".into(),
                 None,
                 Some(50),
             ),
             Platform::Unknown => (
-                vec!["qwen3-coder:30b-gpu".into()],
+                vec!["qwen3.6:27b-instruct-q4_K_M-gpu".into()],
                 Some("gemma4:26b-devops".into()),
                 Some("devstral-small-2-gpu".into()),
                 "q4_0".into(),

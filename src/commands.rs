@@ -738,7 +738,7 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
 
     if platform.is_macos() {
         let candidates: Vec<String> = match model {
-            "qwen3-coder:30b-devops" => vec!["qwen3-coder-30b-devops.modelfile".into()],
+            "qwen3.6:27b-instruct-q4_K_M-devops" => vec!["qwen3-coder-30b-devops.modelfile".into()],
             "qwen2.5-coder:14b-devops" => vec!["qwen2.5-coder-14b-devops.modelfile".into()],
             "qwen2.5-coder:14b-quick" => vec!["qwen2.5-coder-14b-quick.modelfile".into()],
             "qwen2.5-coder:7b-quick" => vec!["qwen2.5-coder-7b-quick.modelfile".into()],
@@ -758,7 +758,7 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
         }
     } else if matches!(platform, Platform::CachyOS | Platform::Linux) {
         let candidates: Vec<String> = match model {
-            "qwen3-coder:30b-gpu" => vec!["qwen3-coder-30b-gpu.modelfile".into()],
+            "qwen3.6:27b-instruct-q4_K_M-gpu" => vec!["qwen3.6-27b-gpu.modelfile".into()],
             "gemma4:26b-devops" => vec!["gemma4-26b-devops.modelfile".into()],
             "devstral-small-2-gpu" => vec!["devstral-small-2-gpu.modelfile".into()],
             "qwen3:8b" => vec!["qwen3-8b-gpu.modelfile".into()],
@@ -817,7 +817,7 @@ async fn crush(args: CrushArgs, verbose: bool) -> anyhow::Result<()> {
                 config
                     .devops_model
                     .as_deref()
-                    .unwrap_or("qwen3-coder:30b-gpu")
+                    .unwrap_or("qwen3.6:27b-instruct-q4_K_M-gpu")
             );
             println!(
                 "   Quick:   small → {}",

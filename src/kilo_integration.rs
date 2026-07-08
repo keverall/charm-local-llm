@@ -62,7 +62,7 @@ pub fn generate_agents_md(config: &Config) -> String {
     let devops = config
         .devops_model
         .as_deref()
-        .unwrap_or("qwen3-coder:30b-gpu");
+        .unwrap_or("qwen3.6:27b-instruct-q4_K_M-gpu");
     let quick = config
         .quick_model
         .as_deref()
@@ -127,11 +127,11 @@ Auto-detected at runtime via `sysctl` (macOS) or `/etc/os-release` (Linux), or o
 
 | Platform | Directory | Memory/GPU | Primary Model | Quick Model |
 |----------|-----------|------------|---------------|-------------|
-| CachyOS RTX 4090 | `cachyos-i9-32gb-nvidia-4090` | 24GB VRAM | `qwen3-coder:30b-gpu` | `devstral-small-2-gpu` |
+| CachyOS RTX 4090 | `cachyos-i9-32gb-nvidia-4090` | 24GB VRAM | `qwen3.6:27b-instruct-q4_K_M-gpu` | `devstral-small-2-gpu` |
 | macOS M4 24GB | `macos-m4-24gb` | 24GB unified | `qwen2.5-coder:14b-devops` | `qwen2.5-coder:7b-quick` |
-| macOS M4 32GB | `macos-m4-32gb` | 32GB unified | `qwen3-coder:30b-devops` | `qwen2.5-coder:7b-quick` |
+| macOS M4 32GB | `macos-m4-32gb` | 32GB unified | `qwen3.6:27b-instruct-q4_K_M-devops` | `qwen2.5-coder:7b-quick` |
 | macOS M5 24GB | `macos-m5-24gb` | 24GB unified | `qwen2.5-coder:14b-devops` | `qwen2.5-coder:7b-quick` |
-| macOS M5 32GB | `macos-m5-32gb` | 32GB unified | `qwen3-coder:30b-devops` | `qwen2.5-coder:14b-quick` |
+| macOS M5 32GB | `macos-m5-32gb` | 32GB unified | `qwen3.6:27b-instruct-q4_K_M-devops` | `qwen2.5-coder:14b-quick` |
 
 Override example: `charm start --platform macos-m5-32gb`
 
@@ -254,9 +254,9 @@ fn patch_kilo_providers(
             "baseURL": ollama_base
         },
         "models": {
-            "qwen3-coder:30b-gpu": { "name": "Qwen3 Coder 30B GPU" },
-            "qwen3-coder:30b-devops": { "name": "Qwen3 Coder 30B DevOps" },
-            "qwen3-coder:30b": { "name": "Qwen3 Coder 30B" },
+            "qwen3.6:27b-instruct-q4_K_M-gpu": { "name": "Qwen3 Coder 30B GPU" },
+            "qwen3.6:27b-instruct-q4_K_M-devops": { "name": "Qwen3 Coder 30B DevOps" },
+            "qwen3.6:27b-instruct-q4_K_M": { "name": "Qwen3 Coder 30B" },
             "qwen3:8b": { "name": "Qwen3 8B" },
             "gemma4:26b-devops": { "name": "Gemma 4 26B Devops" },
             "devstral-small-2-gpu": { "name": "Devstral Small 2 GPU" },

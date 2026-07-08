@@ -31,7 +31,7 @@ fn test_build_crush_config_large_is_devops_model() {
     let crush = charm_local_llm::crush::build_crush_config(&config);
 
     let large = &crush.models["large"];
-    assert_eq!(large.model, "qwen3-coder:30b-gpu");
+    assert_eq!(large.model, "qwen3.6:27b-instruct-q4_K_M-gpu");
 }
 
 #[test]
@@ -63,7 +63,7 @@ fn test_crush_config_path_is_under_home() {
 fn test_generate_crush_md_contains_devops_model() {
     let config = Config::default(Platform::CachyOS);
     let md = charm_local_llm::crush::generate_crush_md(&config);
-    assert!(md.contains("qwen3-coder:30b-gpu"));
+    assert!(md.contains("qwen3.6:27b-instruct-q4_K_M-gpu"));
     assert!(md.contains("Primary LLM"));
     assert!(md.contains("localhost:11434"));
 }
@@ -159,7 +159,7 @@ fn test_generate_agents_md_contains_project_info() {
     let config = Config::default(Platform::CachyOS);
     let md = charm_local_llm::kilo_integration::generate_agents_md(&config);
     assert!(md.contains("charm-local-llm"));
-    assert!(md.contains("qwen3-coder:30b-gpu"));
+    assert!(md.contains("qwen3.6:27b-instruct-q4_K_M-gpu"));
     assert!(md.contains("devstral-small-2-gpu"));
     assert!(md.contains("make build"));
 }
@@ -186,7 +186,7 @@ fn test_macos_m5_32gb_defaults_to_30b_devops() {
     let config = Config::default(Platform::MacOSM532Gb);
     assert_eq!(
         config.devops_model.as_deref(),
-        Some("qwen3-coder:30b-devops")
+        Some("qwen3.6:27b-instruct-q4_K_M-devops")
     );
     assert_eq!(
         config.quick_model.as_deref(),

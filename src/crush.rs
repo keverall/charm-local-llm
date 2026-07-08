@@ -87,7 +87,7 @@ pub fn build_crush_config(config: &Config) -> CrushConfig {
     let devops_model = config
         .devops_model
         .as_deref()
-        .unwrap_or("qwen3-coder:30b-gpu");
+        .unwrap_or("qwen3.6:27b-instruct-q4_K_M-gpu");
     let quick_model = config
         .quick_model
         .as_deref()
@@ -95,8 +95,8 @@ pub fn build_crush_config(config: &Config) -> CrushConfig {
     let embed_model = "nomic-embed-text";
 
     let known_models = vec![
-        ("qwen3-coder:30b-gpu", "Qwen3 Coder 30B GPU"),
-        ("qwen3-coder:30b", "Qwen3 Coder 30B"),
+        ("qwen3.6:27b-instruct-q4_K_M-gpu", "Qwen3 Coder 30B GPU"),
+        ("qwen3.6:27b-instruct-q4_K_M", "Qwen3 Coder 30B"),
         ("qwen3:8b", "Qwen3 8B"),
         ("gemma4:26b-devops", "Gemma 4 26B Devops"),
         ("gemma4:26b", "Gemma 4 26B"),
@@ -272,7 +272,7 @@ pub fn generate_crush_md(config: &Config) -> String {
     let devops = config
         .devops_model
         .as_deref()
-        .unwrap_or("qwen3-coder:30b-gpu");
+        .unwrap_or("qwen3.6:27b-instruct-q4_K_M-gpu");
     let quick = config
         .quick_model
         .as_deref()
