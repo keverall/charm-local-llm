@@ -646,12 +646,14 @@ async fn warmup_models(client: &OllamaClient, config: &Config) -> anyhow::Result
         }
     }
     for m in &config.default_models {
-        if (m.contains("30b") || m.contains("26b")) && !models_to_warm.contains(m) {
+        if (m.contains("30b") || m.contains("26b") || m.contains("27b"))
+            && !models_to_warm.contains(m)
+        {
             models_to_warm.push(m.clone());
         }
     }
     for model in models_to_warm {
-        let timeout = if model.contains("30b") || model.contains("26b") {
+        let timeout = if model.contains("30b") || model.contains("26b") || model.contains("27b") {
             300
         } else {
             120
@@ -738,7 +740,7 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
 
     if platform.is_macos() {
         let candidates: Vec<String> = match model {
-            "qwen3.6:27b-instruct-q4_K_M-devops" => vec!["qwen3-coder-30b-devops.modelfile".into()],
+            "qwen3.6:27b-instruct-q4_K_M-devops" => vec!["qwen3.6-27b-devops.modelfile".into()],
             "qwen2.5-coder:14b-devops" => vec!["qwen2.5-coder-14b-devops.modelfile".into()],
             "qwen2.5-coder:14b-quick" => vec!["qwen2.5-coder-14b-quick.modelfile".into()],
             "qwen2.5-coder:7b-quick" => vec!["qwen2.5-coder-7b-quick.modelfile".into()],

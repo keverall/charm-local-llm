@@ -182,7 +182,7 @@ fn test_macos_m4_24gb_defaults_to_14b_devops() {
 }
 
 #[test]
-fn test_macos_m5_32gb_defaults_to_30b_devops() {
+fn test_macos_m5_32gb_defaults_to_27b_devops() {
     let config = Config::default(Platform::MacOSM532Gb);
     assert_eq!(
         config.devops_model.as_deref(),

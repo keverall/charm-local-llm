@@ -254,9 +254,9 @@ fn patch_kilo_providers(
             "baseURL": ollama_base
         },
         "models": {
-            "qwen3.6:27b-instruct-q4_K_M-gpu": { "name": "Qwen3 Coder 30B GPU" },
-            "qwen3.6:27b-instruct-q4_K_M-devops": { "name": "Qwen3 Coder 30B DevOps" },
-            "qwen3.6:27b-instruct-q4_K_M": { "name": "Qwen3 Coder 30B" },
+            "qwen3.6:27b-instruct-q4_K_M-gpu": { "name": "Qwen 3.6 27B GPU" },
+            "qwen3.6:27b-instruct-q4_K_M-devops": { "name": "Qwen 3.6 27B DevOps" },
+            "qwen3.6:27b-instruct-q4_K_M": { "name": "Qwen 3.6 27B" },
             "qwen3:8b": { "name": "Qwen3 8B" },
             "gemma4:26b-devops": { "name": "Gemma 4 26B Devops" },
             "devstral-small-2-gpu": { "name": "Devstral Small 2 GPU" },

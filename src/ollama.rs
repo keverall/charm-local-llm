@@ -247,7 +247,10 @@ impl OllamaClient {
 
     pub async fn warmup_model(&self, model_name: &str, timeout_seconds: u64) -> anyhow::Result<()> {
         info!("Warming up model: {}", model_name);
-        let prompt = if model_name.contains("30b") || model_name.contains("26b") {
+        let prompt = if model_name.contains("30b")
+            || model_name.contains("26b")
+            || model_name.contains("27b")
+        {
             "Hello".to_string()
         } else {
             "ok".to_string()
