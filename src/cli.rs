@@ -32,6 +32,23 @@ pub enum Command {
     Crush(CrushArgs),
     /// Manage Kilocode config and context
     Kilo(KiloArgs),
+    /// Print the resolved configuration (evaluated with live environment variables)
+    Config(ConfigArgs),
+}
+
+#[derive(Parser)]
+pub struct ConfigArgs {
+    /// Platform override (auto, macos-m4-24gb, macos-m4-32gb, macos-m5-24gb, macos-m5-32gb, cachyos, linux)
+    #[arg(long)]
+    pub platform_override: Option<String>,
+
+    /// Project root directory
+    #[arg(long)]
+    pub project_root: Option<PathBuf>,
+
+    /// Emit the resolved configuration as JSON
+    #[arg(long)]
+    pub json: bool,
 }
 
 #[derive(Parser)]

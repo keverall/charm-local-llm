@@ -1,4 +1,5 @@
 use charm_local_llm::{Config, Platform};
+use std::collections::HashMap;
 
 #[test]
 fn test_build_crush_config_has_ollama_provider() {
@@ -179,6 +180,49 @@ fn test_macos_m4_24gb_defaults_to_14b_devops() {
         .modfile_dir
         .to_string_lossy()
         .contains("macos-m4-24gb"));
+}
+
+#[test]
+fn test_config_evaluation_route_applies_env_overrides() {
+    let root = std::path::PathBuf::from("/tmp/kcharm-eval-test");
+    let mut env = HashMap::new();
+    env.insert("OLLAMA_NUM_PARALLEL".to_string(), "8".to_string());
+    env.insert("OLLAMA_MAX_LOADED_MODELS".to_string(), "1".to_string());
+    env.insert("OLLAMA_GPU_LAYERS".to_string(), "40".to_string());
+    env.insert("DEVOPS_MODEL".to_string(), "custom-devops".to_string());
+
+    let config = Config::new(Platform::CachyOS, &root).with_env_overrides(env);
+
+    assert_eq!(config.ollama_num_parallel, 8);
+    assert_eq!(config.ollama_max_loaded_models, 1);
+    assert_eq!(config.ollama_gpu_layers, Some(40));
+    assert_eq!(config.devops_model.as_deref(), Some("custom-devops"));
+}
+
+#[test]
+fn test_cachyos_default_passes_single_gpu_profile() {
+    let config = Config::default(Platform::CachyOS);
+    assert!(config.validate_cachyos_single_gpu_profile().is_ok());
+}
+
+#[test]
+fn test_cachyos_profile_rejects_unset_gpu_layers() {
+    let root = std::path::PathBuf::from("/tmp/kcharm-eval-test");
+    let mut env = HashMap::new();
+    env.insert("OLLAMA_GPU_LAYERS".to_string(), "0".to_string());
+
+    let config = Config::new(Platform::CachyOS, &root).with_env_overrides(env);
+    assert!(config.validate_cachyos_single_gpu_profile().is_err());
+}
+
+#[test]
+fn test_cachyos_profile_rejects_zero_parallel() {
+    let root = std::path::PathBuf::from("/tmp/kcharm-eval-test");
+    let mut env = HashMap::new();
+    env.insert("OLLAMA_NUM_PARALLEL".to_string(), "0".to_string());
+
+    let config = Config::new(Platform::CachyOS, &root).with_env_overrides(env);
+    assert!(config.validate_cachyos_single_gpu_profile().is_err());
 }
 
 #[test]

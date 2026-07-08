@@ -1,6 +1,7 @@
 use crate::cli::{
-    Cli, Command, CrushAction, CrushArgs, KiloAction, KiloArgs, ModelsAction, ModelsArgs,
-    QdrantAction, QdrantArgs, ServiceAction, ServiceArgs, StartArgs, StatusArgs, StopArgs,
+    Cli, Command, ConfigArgs, CrushAction, CrushArgs, KiloAction, KiloArgs, ModelsAction,
+    ModelsArgs, QdrantAction, QdrantArgs, ServiceAction, ServiceArgs, StartArgs, StatusArgs,
+    StopArgs,
 };
 use crate::ollama::{ollama_running, start_ollama_direct, OllamaClient};
 use crate::platform::{
@@ -52,6 +53,7 @@ pub async fn execute(cli: Cli) -> anyhow::Result<()> {
         Command::Qdrant(args) => qdrant(args, cli.verbose).await,
         Command::Crush(args) => crush(args, cli.verbose).await,
         Command::Kilo(args) => kilo(args, cli.verbose).await,
+        Command::Config(args) => config(args, cli.verbose).await,
     }
 }
 
@@ -561,6 +563,95 @@ async fn qdrant(args: QdrantArgs, verbose: bool) -> anyhow::Result<()> {
             println!("{}", String::from_utf8_lossy(&output.stdout));
         }
     }
+
+    Ok(())
+}
+
+fn print_resolved_config(config: &Config) {
+    println!("⚙️  Resolved kcharm Configuration");
+    println!("================================");
+    println!("Platform:               {}", config.platform);
+    println!("Project root:           {}", config.project_root.display());
+    println!("Modfile dir:            {}", config.modfile_dir.display());
+    println!();
+    println!("Ollama:");
+    println!("  Host:                 {}", config.ollama_host);
+    println!("  Port:                 {}", config.ollama_port);
+    println!("  Binary:               {}", config.ollama_bin);
+    println!("  Base URL:             {}", config.ollama_base_url);
+    println!("  Parallel slots:       {}", config.ollama_num_parallel);
+    println!(
+        "  Max loaded models:    {}",
+        config.ollama_max_loaded_models
+    );
+    println!("  KV cache type:        {}", config.ollama_kv_cache_type);
+    println!(
+        "  Flash attention:     {}",
+        config
+            .ollama_flash_attention
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "off".into())
+    );
+    println!(
+        "  GPU layers:          {}",
+        config
+            .ollama_gpu_layers
+            .map(|v| v.to_string())
+            .unwrap_or_else(|| "auto".into())
+    );
+    println!(
+        "  Models path:         {}",
+        config
+            .ollama_models_path
+            .as_ref()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|| "<unset>".into())
+    );
+    println!();
+    println!("Models:");
+    println!(
+        "  DevOps model:        {}",
+        config.devops_model.as_deref().unwrap_or("<unset>")
+    );
+    println!(
+        "  Quick model:         {}",
+        config.quick_model.as_deref().unwrap_or("<unset>")
+    );
+    println!(
+        "  Default models:      {}",
+        config.default_models.join(", ")
+    );
+    println!();
+    println!("Qdrant:");
+    println!("  gRPC port:            {}", config.qdrant_grpc_port);
+    println!("  HTTP port:            {}", config.qdrant_port);
+    println!(
+        "  Data dir:             {}",
+        config.qdrant_data_dir.display()
+    );
+}
+
+async fn config(args: ConfigArgs, verbose: bool) -> anyhow::Result<()> {
+    init_logging(verbose);
+
+    let project_root = resolve_project_root(args.project_root);
+    let platform = detect_platform(args.platform_override.as_deref());
+    let env_path = detect_platform_env_path(&project_root, platform);
+    let env_vars = load_env_file(&env_path);
+    let config = Config::new(platform, &project_root).with_env_overrides(env_vars);
+
+    if matches!(config.platform, Platform::CachyOS) {
+        config.validate_cachyos_single_gpu_profile()?;
+    }
+
+    if args.json {
+        let json = serde_json::to_string_pretty(&config)
+            .map_err(|e| anyhow::anyhow!("failed to serialize config: {e}"))?;
+        println!("{json}");
+        return Ok(());
+    }
+
+    print_resolved_config(&config);
 
     Ok(())
 }

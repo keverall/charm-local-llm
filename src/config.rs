@@ -295,6 +295,55 @@ impl Config {
             .join(self.platform.platform_dir())
             .join("modfiles");
     }
+
+    /// CachyOS runs on a single RTX 4090 (24GB VRAM). These are the only
+    /// memory parameters that keep concurrent model loads within the single-GPU
+    /// budget. Anything that would violate the single-GPU contract is rejected
+    /// rather than silently printed, so operators never boot an OOM-prone config.
+    pub fn validate_cachyos_single_gpu_profile(&self) -> anyhow::Result<()> {
+        const EXPECTED_GPU_LAYERS: u16 = 50;
+        const EXPECTED_NUM_PARALLEL: u16 = 24;
+        const EXPECTED_MAX_LOADED: u16 = 2;
+
+        if self.ollama_num_parallel == 0 {
+            anyhow::bail!(
+                "OLLAMA_NUM_PARALLEL must be >= 1 for the single-GPU CachyOS profile (got 0)"
+            );
+        }
+        if self.ollama_max_loaded_models == 0 {
+            anyhow::bail!(
+                "OLLAMA_MAX_LOADED_MODELS must be >= 1 for the single-GPU CachyOS profile (got 0)"
+            );
+        }
+        match self.ollama_gpu_layers {
+            None => anyhow::bail!(
+                "OLLAMA_GPU_LAYERS must be set for the single-GPU CachyOS profile (got unset)"
+            ),
+            Some(0) => anyhow::bail!(
+                "OLLAMA_GPU_LAYERS must be > 0 for the single-GPU CachyOS profile (got 0)"
+            ),
+            _ => {}
+        }
+
+        if self.ollama_gpu_layers != Some(EXPECTED_GPU_LAYERS)
+            || self.ollama_num_parallel != EXPECTED_NUM_PARALLEL
+            || self.ollama_max_loaded_models != EXPECTED_MAX_LOADED
+        {
+            anyhow::bail!(
+                "CachyOS single-GPU memory profile overridden: gpu_layers={:?} (expected {}), \
+                 num_parallel={} (expected {}), max_loaded_models={} (expected {}); \
+                 these must stay within the 24GB RTX 4090 budget",
+                self.ollama_gpu_layers,
+                EXPECTED_GPU_LAYERS,
+                self.ollama_num_parallel,
+                EXPECTED_NUM_PARALLEL,
+                self.ollama_max_loaded_models,
+                EXPECTED_MAX_LOADED
+            );
+        }
+
+        Ok(())
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
