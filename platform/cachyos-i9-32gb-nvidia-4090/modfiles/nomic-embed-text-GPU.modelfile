@@ -10,6 +10,7 @@ FROM nomic-embed-text:latest
 # Parameters:       num_batch=512, num_thread=24, num_ctx=512
 #============================================================================
 
+PARAMETER num_gpu -1             # Auto calculate model layers onto ultra-fast VRAM
 PARAMETER num_batch 512
 PARAMETER num_thread 24
 PARAMETER num_ctx 512

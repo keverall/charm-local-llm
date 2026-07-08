@@ -4,6 +4,11 @@ PARAMETER num_batch 512
 PARAMETER num_thread 10
 PARAMETER num_ctx 16384
 PARAMETER num_gpu -1
+PARAMETER num_predict 4096       # Generates deep multiline logic sequences without clipping
+PARAMETER temperature 0.0        # Strict zero-variance mode; completely forces predictability
+PARAMETER top_p 0.9              # High token quality bounds
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"
 
 SYSTEM """You are Qwen 2.5 Coder, a fast coding assistant optimized for Apple Silicon M4 with 32GB unified memory.
 You specialize in quick DevOps tasks, code review, and scripting across Terraform, Ansible, YAML, JSON, TypeScript, JavaScript, Node.js, Go, Python, and Rust.

@@ -150,10 +150,23 @@ impl OllamaClient {
 
         if !parsed_modelfile.parameters.is_empty() {
             let mut params = serde_json::Map::new();
+            let mut stops: Vec<String> = Vec::new();
             for param in &parsed_modelfile.parameters {
+                if param.key == "stop" {
+                    stops.push(param.value.clone());
+                } else {
+                    params.insert(
+                        param.key.clone(),
+                        serde_json::Value::String(param.value.clone()),
+                    );
+                }
+            }
+            if !stops.is_empty() {
                 params.insert(
-                    param.key.clone(),
-                    serde_json::Value::String(param.value.clone()),
+                    "stop".to_string(),
+                    serde_json::Value::Array(
+                        stops.into_iter().map(serde_json::Value::String).collect(),
+                    ),
                 );
             }
             payload["parameters"] = serde_json::Value::Object(params);

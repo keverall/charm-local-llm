@@ -26,8 +26,9 @@ PARAMETER num_predict 4096       # Generates deep multiline logic sequences with
 #----------------------------------------------------------------------------
 PARAMETER temperature 0.0        # Strict zero-variance mode; completely forces predictability
 PARAMETER top_p 0.9              # High token quality bounds
-PARAMETER stop "<|im_start|>"    # Explicit structural layout constraint bounds
-PARAMETER stop "<|im_end|>"      # Prevent runaway loop tokens in code blocks
+# Stop on Qwen chat control tokens to prevent runaway loops and role injection
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"
 
 #----------------------------------------------------------------------------
 # 4. Agentic Engineering System Template

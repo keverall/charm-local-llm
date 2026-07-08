@@ -117,9 +117,13 @@ pub fn parse_modelfile_content(content: &str) -> anyhow::Result<Modelfile> {
         } else if line.starts_with("PARAMETER ") {
             let parts: Vec<&str> = line.split_whitespace().collect();
             if parts.len() >= 3 {
+                let mut value = parts[2].to_string();
+                if value.starts_with('"') && value.ends_with('"') && value.len() >= 2 {
+                    value = value[1..value.len() - 1].to_string();
+                }
                 modelfile.parameters.push(ModelParameter {
                     key: parts[1].to_string(),
-                    value: parts[2].to_string(),
+                    value,
                 });
             }
         } else if line.starts_with("ADAPTER ") {
