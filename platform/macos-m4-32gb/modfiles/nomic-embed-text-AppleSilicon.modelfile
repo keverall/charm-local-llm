@@ -1,9 +1,0 @@
-FROM nomic-embed-text:latest
-
-PARAMETER num_batch 256
-PARAMETER num_thread 10
-PARAMETER num_ctx 512
-PARAMETER num_gpu -1
-
-SYSTEM """You are an embedding model optimized for Apple Silicon M4 unified memory.
-Convert text to numerical embeddings efficiently using Metal GPU acceleration."""
