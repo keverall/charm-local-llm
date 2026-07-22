@@ -1,13 +1,28 @@
+#============================================================================
+# Title:            docker-compose.yml
+# Description:      Docker Compose configuration for Qdrant vector database
+# Author:           Keverall
+# Date:             2026-07-22
+#============================================================================
+
 services:
   qdrant:
     image: qdrant/qdrant:v1.12.0
     container_name: qdrant
     restart: unless-stopped
+    # Raise the open-file limit: without this Qdrant aborts with
+    # "Too many open files" (EMFILE) once collections accumulate, causing a
+    # restart loop that breaks Kilo code indexing.
+    ulimits:
+      nofile:
+        soft: 1048576
+        hard: 1048576
     ports:
       - "${QDRANT_PORT:-6333}:6333"
       - "${QDRANT_GRPC_PORT:-6334}:6334"
     volumes:
-      - "${QDRANT_DATA_DIR:-~/.qdrant}:/qdrant/storage"
+      # Use platform-appropriate data directory
+      - "${QDRANT_DATA_DIR:-./data/qdrant}:/qdrant/storage"
     environment:
       - QDRANT__SERVICE__HTTP_PORT=6333
       - QDRANT__SERVICE__GRPC_PORT=6334
