@@ -1,5 +1,22 @@
 # charm-local-llm
 
+- [charm-local-llm](#charm-local-llm)
+  - [Summary](#summary)
+  - [Project Structure](#project-structure)
+  - [What It Does](#what-it-does)
+  - [Local Models (RTX 4090, 24GB VRAM)](#local-models-rtx-4090-24gb-vram)
+  - [Crush Integration](#crush-integration)
+  - [Kilocode Integration](#kilocode-integration)
+    - [Context filtering (`.kiloignore`)](#context-filtering-kiloignore)
+  - [Quick Start](#quick-start)
+  - [Installation](#installation)
+  - [CLI Commands](#cli-commands)
+  - [Make Targets](#make-targets)
+  - [Prerequisites](#prerequisites)
+  - [License](#license)
+
+## Summary
+
 Rust CLI that automates setup, optimization, and lifecycle management of local Ollama LLMs on CachyOS RTX 4090 and Apple Silicon MacBooks. Generates coding assistant configs for Crush and Kilocode so your entire AI toolchain runs locally.
 
 ## Project Structure
