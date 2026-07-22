@@ -87,7 +87,7 @@ pub fn build_crush_config(config: &Config) -> CrushConfig {
     let devops_model = config
         .devops_model
         .as_deref()
-        .unwrap_or("qwen3.6:27b-instruct-q4_K_M-gpu");
+        .unwrap_or("gemma4:26b-devops");
     let quick_model = config
         .quick_model
         .as_deref()
@@ -95,13 +95,10 @@ pub fn build_crush_config(config: &Config) -> CrushConfig {
     let embed_model = "nomic-embed-text";
 
     let known_models = vec![
-        ("qwen3.6:27b-instruct-q4_K_M-gpu", "Qwen 3.6 27B GPU"),
-        ("qwen3.6:27b-instruct-q4_K_M", "Qwen 3.6 27B"),
-        ("qwen3:8b", "Qwen3 8B"),
+        ("qwen3-coder:30b-gpu", "Qwen 3 Coder 30B GPU"),
         ("gemma4:26b-devops", "Gemma 4 26B Devops"),
-        ("gemma4:26b", "Gemma 4 26B"),
         ("devstral-small-2-gpu", "Devstral Small 2 GPU"),
-        ("devstral-small-2", "Devstral Small 2"),
+        ("Qwen2.5-7B-instruct-GPU", "Qwen 2.5 7B Instruct GPU"),
         ("qwen2.5-coder:32b-devops", "Qwen 2.5 Coder 32B DevOps"),
         ("qwen2.5-coder:14b-devops", "Qwen 2.5 Coder 14B DevOps"),
         ("qwen2.5-coder:14b-quick", "Qwen 2.5 Coder 14B Quick"),
@@ -109,8 +106,12 @@ pub fn build_crush_config(config: &Config) -> CrushConfig {
         ("qwen2.5-coder:32b", "Qwen 2.5 Coder 32B"),
         ("qwen2.5-coder:14b", "Qwen 2.5 Coder 14B"),
         ("qwen2.5-coder:7b", "Qwen 2.5 Coder 7B"),
+        ("gemma4:e4b", "Gemma 4 E4B"),
+        ("qwen2.5-coder:3b", "Qwen 2.5 Coder 3B Quick"),
+        ("llama3.1:8b", "Llama 3.1 8B"),
         ("nomic-embed-text", "Nomic Embed Text"),
         ("nomic-embed-text:latest", "Nomic Embed Text"),
+        ("snowflake-arctic-embed", "Snowflake Arctic Embed"),
     ];
 
     let label = |id: &str| {
@@ -272,7 +273,7 @@ pub fn generate_crush_md(config: &Config) -> String {
     let devops = config
         .devops_model
         .as_deref()
-        .unwrap_or("qwen3.6:27b-instruct-q4_K_M-gpu");
+        .unwrap_or("gemma4:26b-devops");
     let quick = config
         .quick_model
         .as_deref()

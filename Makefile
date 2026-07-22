@@ -141,6 +141,23 @@ deps-check: ## Write outdated-dependency report to deps-outdated.txt
 run: ## Run the CLI: make run ARGS="start --platform-override cachyos"
 	$(CARGO) run --profile $(PROFILE) -- $(ARGS)
 
+# ─── Daily Start-of-Day ───────────────────────────────────────────────────────
+# `make sod` is the kcharm equivalent of the Ollama repo's sod.sh: it refreshes
+# dependencies, rebuilds kcharm, then runs `kcharm start` which brings up Ollama
+# + models + Qdrant and regenerates the Crush/Kilo/AGENTS configs for local
+# Ollama. Run `make bootstrap` once (with sudo) to install the systemd unit,
+# passwordless sudo, and desktop autostart — after that the Ollama repo is
+# redundant and can be deleted.
+.PHONY: sod bootstrap
+
+sod: ## Start-of-day: update deps, build, then kcharm start (env + configs)
+	@$(MAKE) deps-update
+	@$(MAKE) build
+	@command -v kcharm >/dev/null 2>&1 && kcharm start || $(CARGO) run --profile $(PROFILE) -- start
+
+bootstrap: ## One-time OS bootstrap: systemd unit, passwordless sudo, autostart
+	@command -v kcharm >/dev/null 2>&1 && kcharm service install || $(CARGO) run --profile $(PROFILE) -- service install
+
 # ─── Cleanup ──────────────────────────────────────────────────────────────────
 .PHONY: clean clean-all
 

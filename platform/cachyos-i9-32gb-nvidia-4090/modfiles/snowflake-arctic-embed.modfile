@@ -1,8 +1,8 @@
-FROM nomic-embed-text:latest
+FROM snowflake-arctic-embed-l:latest
 
 #============================================================================
-# Title:            nomic-embed-text-GPU.modelfile
-# Description:      Hardware-optimized modfile for Nomic Embed Text model on RTX 4090
+# Title:            snowflake-arctic-embed.modfile
+# Description:      Hardware-optimized modfile for Snowflake Arctic Embed model
 # Author:           Keverall
 # Date:             2026-04-28
 # Version:          1.0.0

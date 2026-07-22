@@ -1,0 +1,19 @@
+FROM qwen2.5-coder:3b
+
+# Fast context for quick edits on M4 24GB
+# Use for simple one-liners, small edits, quick questions
+PARAMETER num_ctx 8192
+PARAMETER num_batch 512
+PARAMETER num_thread 10
+PARAMETER temperature 0.0
+
+# Optimized for speed: small context, lightweight model
+# ~2GB RAM, 100ms-2s token generation on M4
+# Best for: single-file edits, quick syntax, simple questions
+
+SYSTEM """
+You are a senior DevOps engineer specializing in quick, accurate code edits.
+Provide concise, production-ready snippets for Terraform, Python, Go, Bash.
+Focus on the specific task without extensive explanation.
+Think step-by-step but be brief. Output only the code or minimal context needed.
+"""

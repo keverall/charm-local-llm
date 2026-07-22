@@ -41,7 +41,7 @@ Auto-detected at runtime via `sysctl` (macOS) or `/etc/os-release` (Linux), or o
 
 | Platform | Directory | Memory/GPU | Primary Model | Quick Model |
 |----------|-----------|------------|---------------|-------------|
-| CachyOS RTX 4090 | `cachyos-i9-32gb-nvidia-4090` | 24GB VRAM | `qwen3.6:27b-instruct-q4_K_M-gpu` | `devstral-small-2-gpu` |
+| CachyOS RTX 4090 | `cachyos-i9-32gb-nvidia-4090` | 24GB VRAM | `qwen3-coder:30b-gpu` | `devstral-small-2-gpu` |
 | macOS M4 24GB | `macos-m4-24gb` | 24GB unified | `qwen2.5-coder:14b-devops` | `qwen2.5-coder:7b-quick` |
 | macOS M4 32GB | `macos-m4-32gb` | 32GB unified | `qwen3.6:27b-instruct-q4_K_M-devops` | `qwen2.5-coder:7b-quick` |
 | macOS M5 24GB | `macos-m5-24gb` | 24GB unified | `qwen2.5-coder:14b-devops` | `qwen2.5-coder:7b-quick` |
@@ -53,7 +53,7 @@ Override example: `kcharm start --platform macos-m5-32gb`
 
 - **Current platform**: `cachyos` (`cachyos-i9-32gb-nvidia-4090`)
 - **Memory/GPU**: NVIDIA RTX 4090 (24GB VRAM)
-- **Primary coding model**: `qwen3.6:27b-instruct-q4_K_M-gpu`
+- **Primary coding model**: `gemma4:26b-devops`
 - **Quick model**: `devstral-small-2-gpu`
 - **Embeddings**: `nomic-embed-text` (768 dims)
 - **Ollama**: <http://localhost:11434>
@@ -65,7 +65,7 @@ Override example: `kcharm start --platform macos-m5-32gb`
 `kcharm start` generates `~/.config/crush/crush.json`:
 
 - **Provider**: `ollama` at <http://localhost:11434/v1/> with `discover_models: true`
-- **large + medium** → `qwen3.6:27b-instruct-q4_K_M-gpu` (8192 max tokens)
+- **large + medium** → `gemma4:26b-devops` (8192 max tokens)
 - **small** → `devstral-small-2-gpu` (4096 max tokens)
 - **Context paths**: CRUSH.md, AGENTS.md, .clinerules
 

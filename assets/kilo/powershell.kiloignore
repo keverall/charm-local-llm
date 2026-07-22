@@ -1,0 +1,8 @@
+# PowerShell/DotNet-specific (composed into .kiloignore by kcharm)
+.ps1xml
+.clixml
+.psc1
+.msh_history
+.ps_history
+modules/
+PSScriptAnalyzer/

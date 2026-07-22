@@ -1,0 +1,8 @@
+# Infrastructure-as-Code specific (composed into .kiloignore by kcharm)
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfbackup
+crash.log
+.ansible/
+*.retry

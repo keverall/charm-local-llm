@@ -1,0 +1,6 @@
+# TypeScript/Node-specific (composed into .kiloignore by kcharm)
+node_modules/
+.npm/
+.eslintcache
+*.tsbuildinfo
+coverage/

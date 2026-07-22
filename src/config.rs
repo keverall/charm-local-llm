@@ -144,18 +144,17 @@ impl Config {
             ),
             Platform::CachyOS | Platform::Linux => (
                 vec![
-                    "qwen3.6:27b-instruct-q4_K_M-gpu".into(),
-                    "qwen3:8b".into(),
+                    "qwen3-coder:30b-gpu".into(),
                     "nomic-embed-text:latest".into(),
                 ],
-                Some("qwen3.6:27b-instruct-q4_K_M-gpu".into()),
+                Some("gemma4:26b-devops".into()),
                 Some("devstral-small-2-gpu".into()),
                 "q4_0".into(),
                 None,
                 Some(50),
             ),
             Platform::Unknown => (
-                vec!["qwen3.6:27b-instruct-q4_K_M-gpu".into()],
+                vec!["qwen3-coder:30b-gpu".into()],
                 Some("gemma4:26b-devops".into()),
                 Some("devstral-small-2-gpu".into()),
                 "q4_0".into(),
@@ -202,10 +201,7 @@ impl Config {
     }
 
     pub fn default(platform: Platform) -> Self {
-        let project_root = dirs::home_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
-            .join("repos")
-            .join("ollama");
+        let project_root = crate::platform::resolve_project_root(None);
         Self::new(platform, &project_root)
     }
 

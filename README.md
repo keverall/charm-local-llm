@@ -56,18 +56,19 @@ charm-local-llm/
 
 | Model | Role | VRAM |
 | ------- | ------ | ------ |
-| `qwen3.6:27b-instruct-q4_K_M-gpu` | Primary — coding, complex reasoning | ~18GB |
-| `qwen3:8b` | Lightweight general-purpose (newest Qwen3 arch) | ~5GB |
+| `gemma4:26b-devops` | Primary DevOps — coding, complex reasoning | ~17GB |
+| `qwen3-coder:30b-gpu` | Coding — general purpose coder | ~18GB |
 | `devstral-small-2-gpu` | Quick — fast responses, simple tasks | ~15GB |
+| `Qwen2.5-7B-instruct-GPU` | Lightweight general-purpose | ~5GB |
 | `nomic-embed-text` | Embeddings for semantic search (768 dims) | ~300MB |
-| `gemma4:26b-devops` | Alternative coding model | ~17GB |
+| `snowflake-arctic-embed` | Alternative embeddings model | ~300MB |
 
 ## Crush Integration
 
 `kcharm start` generates `~/.config/crush/crush.json`:
 
 - **Provider**: `ollama` at `http://localhost:11434/v1/` with `discover_models: true`
-- **large + medium slots** → `qwen3.6:27b-instruct-q4_K_M-gpu` (8192 max tokens)
+- **large + medium slots** → `gemma4:26b-devops` (8192 max tokens)
 - **small slot** → `devstral-small-2-gpu` (4096 max tokens)
 - **Context paths**: `CRUSH.md`, `AGENTS.md`, `.clinerules`
 - **Permissions**: bash, view, edit, write, glob, grep
@@ -82,6 +83,18 @@ Also generates `CRUSH.md` in the project root with model info and guidelines for
 - Removes any unsupported `indexing` block.
 
 Kilocode then runs chat/inference directly against local Ollama — no external gateway, so data stays on-machine.
+
+### Context filtering (`.kiloignore`)
+
+To keep prompts small, cheap, and free of secrets, `kcharm` also emits a `.kiloignore` into the project root (next to `AGENTS.md`). It is **composed**, not monolithic:
+
+- `assets/kilo/base.kiloignore` — universal rules (build dirs, binaries, media, logs, IDE files, **and secret/credential protection**: `.env`, `*.pem`, `*.key`, `id_rsa*`, `*.tfvars`, `kubeconfig*`, etc.).
+- Language/task **fragments** — `rust.kiloignore`, `go.kiloignore`, `ts.kiloignore`, `python.kiloignore`, `powershell.kiloignore`, `iac.kiloignore` (Terraform/Ansible/K8s).
+
+On `kcharm kilo init` / `kcharm start`, `kcharm` detects the languages present in the project (via `Cargo.toml`, `go.mod`, `package.json`, `*.tf`, `*.ps1`, …) and appends the matching fragments, de-duplicating lines. The result is a single `.kiloignore` Kilocode understands.
+
+- Non-destructive: if a `.kiloignore` already exists it is left untouched.
+- Edit the files under `assets/kilo/` to tune rules, then **rebuild** (`make build` / `make sod`) — they are embedded into the `kcharm` binary at compile time.
 
 ## Quick Start
 
@@ -127,7 +140,7 @@ kcharm kilo status                    # Show Kilo config status
 kcharm kilo context                   # Generate AGENTS.md
 
 kcharm models list                    # List installed models
-kcharm models ensure qwen3.6:27b-instruct-q4_K_M-gpu  # Ensure model exists
+kcharm models ensure qwen3-coder:30b-gpu  # Ensure model exists
 kcharm models remove old-model        # Remove model
 
 kcharm service start|stop|restart|status

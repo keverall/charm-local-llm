@@ -1,0 +1,5 @@
+# Go-specific (composed into .kiloignore by kcharm)
+vendor/
+*.test
+*.out
+bin/

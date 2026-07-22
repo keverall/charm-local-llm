@@ -43,6 +43,271 @@ fn run_systemctl(config: &Config, args: &[&str]) -> anyhow::Result<bool> {
     Ok(false)
 }
 
+/// Run a command via sudo (non-interactive first; falls back to interactive
+/// sudo only when a TTY is available). Returns true if the command succeeded.
+fn sudo_command(args: &[&str]) -> bool {
+    let try_run = |non_interactive: bool| -> Option<bool> {
+        let mut cmd = ProcessCommand::new("sudo");
+        if non_interactive {
+            cmd.arg("-n");
+        }
+        cmd.args(args);
+        cmd.status().ok().map(|s| s.success())
+    };
+    if let Some(ok) = try_run(true) {
+        return ok;
+    }
+    if unsafe { libc::isatty(libc::STDIN_FILENO) } == 1 {
+        if let Some(ok) = try_run(false) {
+            return ok;
+        }
+    }
+    false
+}
+
+fn which(cmd: &str) -> String {
+    std::process::Command::new("sh")
+        .args(["-c", &format!("command -v {}", cmd)])
+        .output()
+        .ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| cmd.to_string())
+}
+
+fn command_exists(cmd: &str) -> bool {
+    ProcessCommand::new(cmd).arg("--version").status().is_ok()
+}
+
+/// Write a file to a privileged location (requires root or sudo). Uses `sudo
+/// tee` when not running as root. `mode` is applied (e.g. 0o644, 0o440).
+fn write_privileged_file(path: &Path, content: &str, mode: u32) -> bool {
+    if unsafe { libc::geteuid() } == 0 {
+        if std::fs::write(path, content).is_ok() {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+            }
+            return true;
+        }
+        return false;
+    }
+
+    let Some(p) = path.to_str() else {
+        return false;
+    };
+    use std::io::Write;
+    let mut child = match ProcessCommand::new("sudo")
+        .args(["tee", p])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        let _ = stdin.write_all(content.as_bytes());
+    }
+    let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+    if ok {
+        let _ = ProcessCommand::new("sudo")
+            .args(["chmod", &format!("{:o}", mode), p])
+            .status();
+        let _ = ProcessCommand::new("sudo")
+            .args(["chown", "root:root", p])
+            .status();
+    }
+    ok
+}
+
+/// Copy the bundled `systemd/ollama.service` into `/etc/systemd/system/`,
+/// install the NVIDIA drop-in if present, then `daemon-reload` + `enable`.
+/// Idempotent and best-effort (warns, never errors, if sudo is unavailable).
+fn install_systemd_unit(config: &Config) -> anyhow::Result<()> {
+    if !matches!(config.platform, Platform::CachyOS | Platform::Linux) {
+        return Ok(());
+    }
+
+    let src = config.project_root.join("systemd").join("ollama.service");
+    if !src.exists() {
+        warn!(
+            "systemd unit file not found at {}; skipping install",
+            src.display()
+        );
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(&src)?;
+    let dest = PathBuf::from("/etc/systemd/system/ollama.service");
+
+    let needs_copy = if dest.exists() {
+        std::fs::read_to_string(&dest)
+            .map(|e| e != content)
+            .unwrap_or(true)
+    } else {
+        true
+    };
+
+    if needs_copy {
+        info!("Installing systemd unit file to {}", dest.display());
+        if !write_privileged_file(&dest, &content, 0o644) {
+            warn!(
+                "Could not install systemd unit (needs root/sudo). Run 'kcharm service install' or:\n  sudo cp {} {}",
+                src.display(),
+                dest.display()
+            );
+            return Ok(());
+        }
+        let dropin_src = config
+            .project_root
+            .join("systemd")
+            .join("platform-overrides")
+            .join("cachyos-nvidia.conf");
+        if dropin_src.exists() {
+            let dropin_dir = PathBuf::from("/etc/systemd/system/ollama.service.d");
+            let _ = std::fs::create_dir_all(&dropin_dir);
+            let _ = write_privileged_file(
+                &dropin_dir.join("cachyos-nvidia.conf"),
+                &std::fs::read_to_string(&dropin_src)?,
+                0o644,
+            );
+        }
+        if sudo_command(&["systemctl", "daemon-reload"]) {
+            info!("systemd daemon reloaded");
+        }
+        if sudo_command(&["systemctl", "enable", "ollama"]) {
+            info!("ollama service enabled for auto-start");
+        }
+    } else {
+        info!("systemd unit file already up to date");
+    }
+    Ok(())
+}
+
+/// Install a restrictive passwordless-sudoers file for Ollama service
+/// management (`/etc/sudoers.d/ollama`), validated with `visudo -cf`.
+fn setup_passwordless_sudo(config: &Config) -> anyhow::Result<()> {
+    if !matches!(config.platform, Platform::CachyOS | Platform::Linux) {
+        return Ok(());
+    }
+    if !command_exists("systemctl") {
+        warn!("systemctl not found; skipping passwordless sudo setup");
+        return Ok(());
+    }
+
+    let target_user = std::env::var("SUDO_USER")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "root".to_string());
+    let systemctl = which("systemctl");
+
+    let sudoers = format!(
+        "# ollama: Passwordless sudo for Ollama service management\n\
+         # Generated by kcharm on {}\n\
+         # Security: restrictive NOPASSWD rules (least privilege)\n\
+         {} ALL=(ALL) NOPASSWD: {} start ollama\n\
+         {} ALL=(ALL) NOPASSWD: {} stop ollama\n\
+         {} ALL=(ALL) NOPASSWD: {} disable ollama\n\
+         {} ALL=(ALL) NOPASSWD: {} enable ollama\n\
+         {} ALL=(ALL) NOPASSWD: {} daemon-reload\n\
+         {} ALL=(ALL) NOPASSWD: {} is-active --quiet ollama\n",
+        chrono::Utc::now().format("%Y-%m-%d"),
+        target_user,
+        systemctl,
+        target_user,
+        systemctl,
+        target_user,
+        systemctl,
+        target_user,
+        systemctl,
+        target_user,
+        systemctl,
+        target_user,
+        systemctl,
+    );
+
+    let tmp = std::env::temp_dir().join(format!("kcharm-sudoers-{}.tmp", std::process::id()));
+    std::fs::write(&tmp, &sudoers)?;
+    let valid = ProcessCommand::new("visudo")
+        .args(["-cf", tmp.to_str().unwrap_or_default()])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if !valid {
+        warn!("Generated sudoers syntax invalid; skipping passwordless sudo setup");
+        let _ = std::fs::remove_file(&tmp);
+        return Ok(());
+    }
+
+    let dest = PathBuf::from("/etc/sudoers.d/ollama");
+    if write_privileged_file(&dest, &sudoers, 0o440) {
+        info!("Passwordless sudo installed at {}", dest.display());
+    } else {
+        warn!(
+            "Could not install sudoers (needs root/sudo). Run 'sudo kcharm service install' or:\n  sudo cp {} {} && sudo chmod 440 {} && sudo chown root:root {}",
+            tmp.display(),
+            dest.display(),
+            dest.display(),
+            dest.display()
+        );
+    }
+    let _ = std::fs::remove_file(&tmp);
+    Ok(())
+}
+
+/// Create an XDG autostart entry (`~/.config/autostart/kcharm-start.desktop`)
+/// that runs `kcharm start` on login (KDE/GNOME/most Linux desktops).
+fn setup_autostart(_config: &Config) -> anyhow::Result<()> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let autostart_dir = home.join(".config").join("autostart");
+    std::fs::create_dir_all(&autostart_dir).ok();
+    let desktop = autostart_dir.join("kcharm-start.desktop");
+
+    let bin = if home.join(".local/bin/kcharm").exists() {
+        home.join(".local/bin/kcharm")
+    } else {
+        std::env::current_exe().unwrap_or_else(|_| PathBuf::from("kcharm"))
+    };
+    let Some(bin_str) = bin.to_str() else {
+        warn!("Could not determine kcharm binary path; skipping autostart");
+        return Ok(());
+    };
+
+    let content = format!(
+        "[Desktop Entry]\n\
+         Type=Application\n\
+         Name=kcharm Start (Ollama DevOps)\n\
+         Comment=Start local Ollama DevOps environment (kcharm start) on login\n\
+         Exec={} start\n\
+         Terminal=false\n\
+         Hidden=false\n\
+         X-GNOME-Autostart-enabled=true\n",
+        bin_str
+    );
+    std::fs::write(&desktop, content)?;
+    info!("Autostart entry created: {}", desktop.display());
+    Ok(())
+}
+
+/// Run the full one-time OS bootstrap: systemd unit, passwordless sudo, and
+/// desktop autostart. This is the kcharm equivalent of sod.sh's OS steps and
+/// is the last piece needed before the Ollama repo can be deleted.
+fn bootstrap_os(config: &Config) -> anyhow::Result<()> {
+    if !matches!(config.platform, Platform::CachyOS | Platform::Linux) {
+        println!("OS bootstrap is only required on Linux (CachyOS). Skipping.");
+        return Ok(());
+    }
+    println!("🔧 One-time OS bootstrap (Linux)...");
+    install_systemd_unit(config)?;
+    let _ = install_systemd_env(config);
+    setup_passwordless_sudo(config)?;
+    setup_autostart(config)?;
+    println!("✅ OS bootstrap complete — the Ollama repo can now be deleted.");
+    Ok(())
+}
+
 pub async fn execute(cli: Cli) -> anyhow::Result<()> {
     match cli.command {
         Command::Start(args) => start(args, cli.verbose).await,
@@ -102,6 +367,13 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         }
     }
 
+    // One-time OS bootstrap (idempotent, best-effort): ensure the systemd unit
+    // and env file exist before attempting to start the service.
+    if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
+        let _ = install_systemd_unit(&config);
+        let _ = install_systemd_env(&config);
+    }
+
     println!("🛑 Stopping existing Ollama processes...");
 
     // Try systemctl stop with passwordless sudo, silently skip if not available
@@ -125,7 +397,7 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         chrono::Utc::now().format("%Y%m%d%H%M%S")
     ));
 
-    let started_via_systemd = if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
+    let _started_via_systemd = if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
         let systemd_works = run_systemctl(&config, &["start", "ollama"])?;
 
         if systemd_works {
@@ -157,10 +429,6 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         tokio::task::spawn_blocking(move || start_ollama_direct(&cfg, &lf)).await??;
         false
     };
-
-    if !started_via_systemd {
-        let _ = install_systemd_env(&config);
-    }
 
     for attempt in 1..16 {
         let port = config.ollama_port;
@@ -254,6 +522,7 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         Ok(path) => println!("   ✅ AGENTS.md: {}", path.display()),
         Err(e) => warn!("   Failed to write AGENTS.md: {}", e),
     }
+    let _ = crate::kilo_integration::ensure_kiloignore(&config);
 
     reload_vscode_window();
 
@@ -477,6 +746,15 @@ async fn service(args: ServiceArgs, verbose: bool) -> anyhow::Result<()> {
                 .stderr(Stdio::piped())
                 .output()?;
             println!("{}", String::from_utf8_lossy(&output.stdout));
+        }
+        ServiceAction::Install => {
+            if args.dry_run {
+                println!(
+                    "[dry-run] Would install systemd unit, passwordless sudo, and desktop autostart"
+                );
+                return Ok(());
+            }
+            bootstrap_os(&config)?;
         }
     }
 
@@ -835,6 +1113,11 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
             "qwen2.5-coder:14b-devops" => vec!["qwen2.5-coder-14b-devops.modelfile".into()],
             "qwen2.5-coder:14b-quick" => vec!["qwen2.5-coder-14b-quick.modelfile".into()],
             "qwen2.5-coder:7b-quick" => vec!["qwen2.5-coder-7b-quick.modelfile".into()],
+            "gemma4:e4b" => vec!["gemma4-e4b.modelfile".into()],
+            "qwen2.5-coder:3b" | "qwen2.5-coder:3b-quick" => {
+                vec!["qwen2.5-coder-3b-quick.modelfile".into()]
+            }
+            "llama3.1:8b" => vec!["llama3.1-8b-devops.modelfile".into()],
             "nomic-embed-text:latest" | "nomic-embed-text" => {
                 vec!["nomic-embed-text-AppleSilicon.modelfile".into()]
             }
@@ -851,10 +1134,11 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
         }
     } else if matches!(platform, Platform::CachyOS | Platform::Linux) {
         let candidates: Vec<String> = match model {
-            "qwen3.6:27b-instruct-q4_K_M-gpu" => vec!["qwen3.6-27b-gpu.modelfile".into()],
+            "qwen3-coder:30b-gpu" => vec!["qwen3-coder-30b-gpu.modelfile".into()],
             "gemma4:26b-devops" => vec!["gemma4-26b-devops.modelfile".into()],
             "devstral-small-2-gpu" => vec!["devstral-small-2-gpu.modelfile".into()],
-            "qwen3:8b" => vec!["qwen3-8b-gpu.modelfile".into()],
+            "Qwen2.5-7B-instruct-GPU" => vec!["Qwen2.5-7B-instruct-GPU.modelfile".into()],
+            "snowflake-arctic-embed" => vec!["snowflake-arctic-embed.modfile".into()],
             "nomic-embed-text:latest" | "nomic-embed-text" => {
                 vec!["nomic-embed-text-GPU.modelfile".into()]
             }
@@ -910,7 +1194,7 @@ async fn crush(args: CrushArgs, verbose: bool) -> anyhow::Result<()> {
                 config
                     .devops_model
                     .as_deref()
-                    .unwrap_or("qwen3.6:27b-instruct-q4_K_M-gpu")
+                    .unwrap_or("gemma4:26b-devops")
             );
             println!(
                 "   Quick:   small → {}",
@@ -948,6 +1232,17 @@ async fn crush(args: CrushArgs, verbose: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+fn emit_kiloignore(config: &Config) {
+    match crate::kilo_integration::ensure_kiloignore(config) {
+        Ok(true) => println!(
+            "   ✅ .kiloignore written to {}",
+            config.project_root.join(".kiloignore").display()
+        ),
+        Ok(false) => println!("   ✅ .kiloignore: already present (left untouched)"),
+        Err(e) => warn!("   ⚠️  Failed to write .kiloignore: {}", e),
+    }
+}
+
 async fn kilo(args: KiloArgs, verbose: bool) -> anyhow::Result<()> {
     init_logging(verbose);
 
@@ -965,6 +1260,7 @@ async fn kilo(args: KiloArgs, verbose: bool) -> anyhow::Result<()> {
             } else {
                 println!("✅ Kilo config has no unsupported indexing block");
             }
+            emit_kiloignore(&config);
         }
         KiloAction::Status => {
             let status = crate::kilo_integration::verify_kilo_config(&config)?;
@@ -992,6 +1288,7 @@ async fn kilo(args: KiloArgs, verbose: bool) -> anyhow::Result<()> {
         KiloAction::Context => {
             let path = crate::kilo_integration::write_agents_md(&config, &project_root)?;
             println!("✅ AGENTS.md written to {}", path.display());
+            emit_kiloignore(&config);
         }
     }
 

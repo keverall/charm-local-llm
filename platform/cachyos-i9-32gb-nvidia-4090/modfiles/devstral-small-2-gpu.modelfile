@@ -7,13 +7,10 @@ FROM devstral-small-2:latest
 # Hardware:         NVIDIA GeForce RTX 4090 (24GB VRAM)
 #============================================================================
 
-PARAMETER num_gpu -1             # Auto calculate model layers onto ultra-fast VRAM
 PARAMETER num_batch 1024
 PARAMETER num_thread 24
 PARAMETER num_ctx 16384
-PARAMETER num_predict 4096       # Generates deep multiline logic sequences without clipping
-PARAMETER temperature 0.0        # Strict zero-variance mode; completely forces predictability
-PARAMETER top_p 0.9              # High token quality bounds
+PARAMETER num_gpu -1
 
 SYSTEM """You are Devstral, a fast and value-priced model optimized for RTX 4090 GPU acceleration.
 You specialize in quick DevOps tasks and scripting. Provide accurate, extremely concise, and helpful responses."""

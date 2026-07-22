@@ -1,0 +1,126 @@
+# ==========================================
+# charm-local-llm — BASE .kiloignore
+# Universal exclusions. `kcharm` composes this with language/task
+# fragments (assets/kilo/*.kiloignore) into your project's .kiloignore.
+# Edit here, then rebuild (make build / make sod) to pick up changes.
+# ==========================================
+
+# ---- SECRETS & CREDENTIALS (never feed to the model) ----
+.env
+.env.*
+*.env
+*.pem
+*.key
+*.pfx
+*.keystore
+*.jks
+id_rsa
+id_rsa.*
+id_dsa
+id_ecdsa
+id_ed25519
+*.p12
+secrets/
+credentials*
+*.tfvars
+terraform.tfvars
+*.kubeconfig
+kubeconfig*
+*.pubxml
+
+# ---- POWERSHELL & DOTNET (compiled/binaries) ----
+bin/
+obj/
+*.exe
+*.dll
+*.pdb
+*.msi
+*.appx
+*.nuget
+packages/
+.nuget/
+
+# ---- EXPENSIVE ENGINE BLOCKS (lockfiles) ----
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+composer.lock
+Cargo.lock
+Gemfile.lock
+poetry.lock
+mix.lock
+go.sum
+
+# ---- DEPENDENCY DIRECTORIES ----
+node_modules/
+bower_components/
+vendor/
+.venv/
+env/
+venv/
+ENV/
+lib/
+packs/
+
+# ---- BUILD OUT & MINIFIED ----
+dist/
+build/
+out/
+target/
+.next/
+.nuxt/
+.docusaurus/
+public/build/
+htmlcov/
+
+# ---- MINIFIED & SOURCE MAPS ----
+*.min.js
+*.min.css
+*.map
+*.bundle.js
+
+# ---- MEDIA, BINARIES, DATA ----
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.svg
+*.ico
+*.mp4
+*.mp3
+*.pdf
+*.zip
+*.tar.gz
+*.rar
+*.so
+*.dylib
+*.sql
+*.sqlite
+*.db
+*.csv
+*.tsv
+*.jsonl
+
+# ---- IDE, SYSTEM, LOGS ----
+.git/
+.svn/
+.idea/
+.vscode/
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*~
+.DS_Store
+Thumbs.db
+*.log
+logs/
+.logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.history/
+
+# ---- GENERATED DOCS ----
+docs/dynamic-code-docs/
+wip/

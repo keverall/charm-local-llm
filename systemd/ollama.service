@@ -1,0 +1,56 @@
+#============================================================================
+# Title:            ollama.service
+# Description:      Systemd service for Ollama Language Model Server
+#                   Managed by kcharm (charm-local-llm) with platform-aware config
+# Author:           Keverall
+# Date:             2026-07-21
+# Version:          2.1.0
+# Documentation:    https://github.com/ollama/ollama
+#============================================================================
+
+[Unit]
+Description=Ollama Language Model Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ollama
+Group=ollama
+
+# Platform-aware configuration loaded via EnvironmentFile
+# Default values provided; kcharm overrides per-platform in /etc/default/ollama
+EnvironmentFile=-/etc/default/ollama
+EnvironmentFile=-/etc/sysconfig/ollama
+
+# Core settings (fallbacks if env files missing)
+Environment=OLLAMA_HOST=::
+Environment=OLLAMA_PORT=11434
+Environment=OLLAMA_NUM_PARALLEL=4
+Environment=OLLAMA_MAX_LOADED_MODELS=1
+
+# Conditional restart policy (not always-on; controlled by kcharm)
+# Restart on failure OR when manually restarted via systemctl
+Restart=ondemand
+RestartSec=5
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+# Executable and arguments
+ExecStart=/usr/local/bin/ollama serve
+ExecStop=/bin/kill -TERM $MAINPID
+
+# GPU device access - only active if OLLAMA_GPU_LAYERS is set > 0
+# Platform-specific drop-in files can add DeviceAllow directives
+# See: /etc/systemd/system/ollama.service.d/cachyos-nvidia.conf
+
+# Standard output and error (configurable)
+StandardOutput=journal
+StandardError=journal
+
+# Systemd hardening defaults (adjust for GPU memory needs)
+# MemoryLimit=20G
+# NoNewPrivileges=no  # Required for NVIDIA driver access
+
+[Install]
+WantedBy=multi-user.target

@@ -90,7 +90,7 @@ pub enum ModelsAction {
     List,
     /// Ensure a model is present (pull or create from modelfile)
     Ensure {
-        /// Model name (e.g. qwen3.6:27b-instruct-q4_K_M-gpu)
+        /// Model name (e.g. qwen3-coder:30b-gpu)
         model: String,
     },
     /// Remove a model
@@ -116,6 +116,8 @@ pub enum ServiceAction {
     Restart,
     /// Show status of the Ollama service
     Status,
+    /// One-time OS bootstrap: install systemd unit, passwordless sudo, desktop autostart
+    Install,
 }
 
 #[derive(Parser)]

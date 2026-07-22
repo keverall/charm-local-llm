@@ -1,6 +1,7 @@
 use crate::config::Config;
 use crate::Platform;
 use serde_json::{json, Value};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
 
@@ -62,7 +63,7 @@ pub fn generate_agents_md(config: &Config) -> String {
     let devops = config
         .devops_model
         .as_deref()
-        .unwrap_or("qwen3.6:27b-instruct-q4_K_M-gpu");
+        .unwrap_or("gemma4:26b-devops");
     let quick = config
         .quick_model
         .as_deref()
@@ -128,7 +129,7 @@ Auto-detected at runtime via `sysctl` (macOS) or `/etc/os-release` (Linux), or o
 
 | Platform | Directory | Memory/GPU | Primary Model | Quick Model |
 |----------|-----------|------------|---------------|-------------|
-| CachyOS RTX 4090 | `cachyos-i9-32gb-nvidia-4090` | 24GB VRAM | `qwen3.6:27b-instruct-q4_K_M-gpu` | `devstral-small-2-gpu` |
+| CachyOS RTX 4090 | `cachyos-i9-32gb-nvidia-4090` | 24GB VRAM | `gemma4:26b-devops` | `devstral-small-2-gpu` |
 | macOS M4 24GB | `macos-m4-24gb` | 24GB unified | `qwen2.5-coder:14b-devops` | `qwen2.5-coder:7b-quick` |
 | macOS M4 32GB | `macos-m4-32gb` | 32GB unified | `qwen3.6:27b-instruct-q4_K_M-devops` | `qwen2.5-coder:7b-quick` |
 | macOS M5 24GB | `macos-m5-24gb` | 24GB unified | `qwen2.5-coder:14b-devops` | `qwen2.5-coder:7b-quick` |
@@ -258,16 +259,19 @@ fn patch_kilo_providers(
             "baseURL": ollama_base
         },
         "models": {
-            "qwen3.6:27b-instruct-q4_K_M-gpu": { "name": "Qwen 3.6 27B GPU" },
-            "qwen3.6:27b-instruct-q4_K_M-devops": { "name": "Qwen 3.6 27B DevOps" },
-            "qwen3.6:27b-instruct-q4_K_M": { "name": "Qwen 3.6 27B" },
-            "qwen3:8b": { "name": "Qwen3 8B" },
+            "qwen3-coder:30b-gpu": { "name": "Qwen 3 Coder 30B GPU" },
             "gemma4:26b-devops": { "name": "Gemma 4 26B Devops" },
             "devstral-small-2-gpu": { "name": "Devstral Small 2 GPU" },
+            "Qwen2.5-7B-instruct-GPU": { "name": "Qwen 2.5 7B Instruct GPU" },
             "qwen2.5-coder:14b-devops": { "name": "Qwen 2.5 Coder 14B DevOps" },
             "qwen2.5-coder:14b-quick": { "name": "Qwen 2.5 Coder 14B Quick" },
             "qwen2.5-coder:7b-quick": { "name": "Qwen 2.5 Coder 7B Quick" },
-            "nomic-embed-text": { "name": "Nomic Embed Text" }
+            "gemma4:e4b": { "name": "Gemma 4 E4B" },
+            "qwen2.5-coder:3b": { "name": "Qwen 2.5 Coder 3B Quick" },
+            "llama3.1:8b": { "name": "Llama 3.1 8B" },
+            "nomic-embed-text:latest": { "name": "Nomic Embed Text" },
+            "nomic-embed-text": { "name": "Nomic Embed Text" },
+            "snowflake-arctic-embed": { "name": "Snowflake Arctic Embed" }
         }
     });
 
@@ -291,4 +295,110 @@ fn patch_kilo_providers(
     }
 
     Ok(false)
+}
+
+// ---------------------------------------------------------------------------
+// .kiloignore composition
+// ---------------------------------------------------------------------------
+const BASE_KILOIGNORE: &str = include_str!("../assets/kilo/base.kiloignore");
+const FRAGMENT_RUST: &str = include_str!("../assets/kilo/rust.kiloignore");
+const FRAGMENT_GO: &str = include_str!("../assets/kilo/go.kiloignore");
+const FRAGMENT_TS: &str = include_str!("../assets/kilo/ts.kiloignore");
+const FRAGMENT_POWERSHELL: &str = include_str!("../assets/kilo/powershell.kiloignore");
+const FRAGMENT_IAC: &str = include_str!("../assets/kilo/iac.kiloignore");
+const FRAGMENT_PYTHON: &str = include_str!("../assets/kilo/python.kiloignore");
+
+/// Which language/task fragments apply to `root`, based on marker files.
+fn detect_kiloignore_fragments(root: &Path) -> Vec<&'static str> {
+    let mut frags: Vec<&'static str> = Vec::new();
+    let has = |name: &str| root.join(name).exists();
+
+    if has("Cargo.toml") {
+        frags.push(FRAGMENT_RUST);
+    }
+    if has("go.mod") {
+        frags.push(FRAGMENT_GO);
+    }
+    if has("package.json") {
+        frags.push(FRAGMENT_TS);
+    }
+    if has("pyproject.toml")
+        || has("requirements.txt")
+        || has("setup.py")
+        || has("Pipfile")
+        || has("poetry.lock")
+    {
+        frags.push(FRAGMENT_PYTHON);
+    }
+    if has("main.tf")
+        || has("terraform.tf")
+        || has("variables.tf")
+        || has("ansible.cfg")
+        || has("playbook.yml")
+        || has("playbook.yaml")
+        || has("Chart.yaml")
+    {
+        frags.push(FRAGMENT_IAC);
+    }
+    let ps = std::fs::read_dir(root)
+        .ok()
+        .map(|d| {
+            d.filter_map(|e| e.ok())
+                .any(|e| {
+                    let n = e.file_name().to_string_lossy().to_lowercase();
+                    n.ends_with(".ps1") || n.ends_with(".psm1") || n.ends_with(".psd1")
+                })
+        })
+        .unwrap_or(false);
+    if ps {
+        frags.push(FRAGMENT_POWERSHELL);
+    }
+    frags
+}
+
+/// Append non-empty, non-comment, de-duplicated lines from `src` into `lines`.
+fn append_kiloignore_lines(
+    lines: &mut Vec<String>,
+    seen: &mut HashSet<String>,
+    src: &str,
+) {
+    for raw in src.lines() {
+        let line = raw.trim_end();
+        if line.is_empty() || line.starts_with('#') {
+            lines.push(line.to_string());
+            continue;
+        }
+        if seen.insert(line.to_string()) {
+            lines.push(line.to_string());
+        }
+    }
+}
+
+/// Compose the final `.kiloignore` content: base + applicable fragments.
+pub fn compose_kiloignore(project_root: &Path) -> String {
+    let mut seen = HashSet::new();
+    let mut lines: Vec<String> = Vec::new();
+    append_kiloignore_lines(&mut lines, &mut seen, BASE_KILOIGNORE);
+    for frag in detect_kiloignore_fragments(project_root) {
+        append_kiloignore_lines(&mut lines, &mut seen, frag);
+    }
+    lines.join("\n") + "\n"
+}
+
+/// Ensure a `.kiloignore` exists in the project root, composing base rules with
+/// language/task fragments. Non-destructive: if one already exists it is left
+/// untouched and `false` is returned.
+pub fn ensure_kiloignore(config: &Config) -> anyhow::Result<bool> {
+    let dest = config.project_root.join(".kiloignore");
+    if dest.exists() {
+        info!(
+            ".kiloignore already exists at {}; leaving untouched",
+            dest.display()
+        );
+        return Ok(false);
+    }
+    let content = compose_kiloignore(&config.project_root);
+    std::fs::write(&dest, content)?;
+    info!(".kiloignore written to {}", dest.display());
+    Ok(true)
 }

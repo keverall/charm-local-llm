@@ -1,0 +1,6 @@
+# Rust-specific (composed into .kiloignore by kcharm)
+.cargo/
+.cargo/registry/
+*.rlib
+*.rmeta
+**/*.rs.bk
