@@ -1118,9 +1118,7 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
                 vec!["qwen2.5-coder-3b-quick.modelfile".into()]
             }
             "llama3.1:8b" => vec!["llama3.1-8b-devops.modelfile".into()],
-            "nomic-embed-text:latest" | "nomic-embed-text" => {
-                vec!["nomic-embed-text-AppleSilicon.modelfile".into()]
-            }
+            "nomic-embed-text:latest" | "nomic-embed-text" => vec![],
             _ => {
                 let base = model.replace([':', '.'], "-");
                 vec![format!("{}.modelfile", base)]
@@ -1139,9 +1137,7 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
             "devstral-small-2-gpu" => vec!["devstral-small-2-gpu.modelfile".into()],
             "Qwen2.5-7B-instruct-GPU" => vec!["Qwen2.5-7B-instruct-GPU.modelfile".into()],
             "snowflake-arctic-embed" => vec!["snowflake-arctic-embed.modfile".into()],
-            "nomic-embed-text:latest" | "nomic-embed-text" => {
-                vec!["nomic-embed-text-GPU.modelfile".into()]
-            }
+            "nomic-embed-text:latest" | "nomic-embed-text" => vec![],
             _ => {
                 let base = model.replace([':', '.'], "-");
                 vec![format!("{}.modelfile", base)]

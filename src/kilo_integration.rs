@@ -343,11 +343,10 @@ fn detect_kiloignore_fragments(root: &Path) -> Vec<&'static str> {
     let ps = std::fs::read_dir(root)
         .ok()
         .map(|d| {
-            d.filter_map(|e| e.ok())
-                .any(|e| {
-                    let n = e.file_name().to_string_lossy().to_lowercase();
-                    n.ends_with(".ps1") || n.ends_with(".psm1") || n.ends_with(".psd1")
-                })
+            d.filter_map(|e| e.ok()).any(|e| {
+                let n = e.file_name().to_string_lossy().to_lowercase();
+                n.ends_with(".ps1") || n.ends_with(".psm1") || n.ends_with(".psd1")
+            })
         })
         .unwrap_or(false);
     if ps {
@@ -357,11 +356,7 @@ fn detect_kiloignore_fragments(root: &Path) -> Vec<&'static str> {
 }
 
 /// Append non-empty, non-comment, de-duplicated lines from `src` into `lines`.
-fn append_kiloignore_lines(
-    lines: &mut Vec<String>,
-    seen: &mut HashSet<String>,
-    src: &str,
-) {
+fn append_kiloignore_lines(lines: &mut Vec<String>, seen: &mut HashSet<String>, src: &str) {
     for raw in src.lines() {
         let line = raw.trim_end();
         if line.is_empty() || line.starts_with('#') {

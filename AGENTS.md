@@ -41,7 +41,7 @@ Auto-detected at runtime via `sysctl` (macOS) or `/etc/os-release` (Linux), or o
 
 | Platform | Directory | Memory/GPU | Primary Model | Quick Model |
 |----------|-----------|------------|---------------|-------------|
-| CachyOS RTX 4090 | `cachyos-i9-32gb-nvidia-4090` | 24GB VRAM | `qwen3-coder:30b-gpu` | `devstral-small-2-gpu` |
+| CachyOS RTX 4090 | `cachyos-i9-32gb-nvidia-4090` | 24GB VRAM | `gemma4:26b-devops` | `devstral-small-2-gpu` |
 | macOS M4 24GB | `macos-m4-24gb` | 24GB unified | `qwen2.5-coder:14b-devops` | `qwen2.5-coder:7b-quick` |
 | macOS M4 32GB | `macos-m4-32gb` | 32GB unified | `qwen3.6:27b-instruct-q4_K_M-devops` | `qwen2.5-coder:7b-quick` |
 | macOS M5 24GB | `macos-m5-24gb` | 24GB unified | `qwen2.5-coder:14b-devops` | `qwen2.5-coder:7b-quick` |
