@@ -3,6 +3,17 @@
 .clixml
 .psc1
 .msh_history
-.ps_history
 modules/
 PSScriptAnalyzer/
+
+
+# ---- POWERSHELL RUNTIME CONTEXTS ----
+*_transcript.*
+.ps_history
+PSScriptAnalyzerSettings.psd1
+vscodeprofile.ps1
+
+# ---- PESTER FUNCTIONAL OUTPUTS ----
+**/TestResults/
+*TestResults.xml
+*.log
