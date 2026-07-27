@@ -58,3 +58,4 @@
 
 # Other Rust-specific files
 .DS_Store
+data/qdrant/

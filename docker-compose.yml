@@ -17,14 +17,17 @@ services:
       nofile:
         soft: 1048576
         hard: 1048576
-    ports:
-      - "${QDRANT_PORT:-6333}:6333"
-      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    # Host networking: bind directly on the host loopback instead of Docker's
+    # bridge. The CachyOS Docker bridge/iptables forwarding is broken (bridges
+    # come up DOWN, host cannot reach container IPs), which made Qdrant
+    # unreachable from localhost and broke Kilo indexing. Host mode sidesteps
+    # all of that. QDRANT__SERVICE__HOST=127.0.0.1 keeps it loopback-only.
+    network_mode: host
     volumes:
       # Use platform-appropriate data directory
       - "${QDRANT_DATA_DIR:-./data/qdrant}:/qdrant/storage"
     environment:
-      - QDRANT__SERVICE__HTTP_PORT=6333
-      - QDRANT__SERVICE__GRPC_PORT=6334
-      - QDRANT__SERVICE__HOST=0.0.0.0
+      - QDRANT__SERVICE__HTTP_PORT=${QDRANT_PORT:-6333}
+      - QDRANT__SERVICE__GRPC_PORT=${QDRANT_GRPC_PORT:-6334}
+      - QDRANT__SERVICE__HOST=127.0.0.1
     entrypoint: ["/qdrant/entrypoint.sh"]
