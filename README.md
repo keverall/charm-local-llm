@@ -4,6 +4,10 @@
   - [Summary](#summary)
   - [Project Structure](#project-structure)
   - [What It Does](#what-it-does)
+  - [Enterprise, High-Side \& Secure Regulatory Compliance Architecture](#enterprise-high-side--secure-regulatory-compliance-architecture)
+    - [Key Security \& Architectural Safeguards](#key-security--architectural-safeguards)
+    - [Enterprise Infrastructure Mapping](#enterprise-infrastructure-mapping)
+    - [Architectural Status](#architectural-status)
   - [Local Models (RTX 4090, 24GB VRAM)](#local-models-rtx-4090-24gb-vram)
   - [Crush Integration](#crush-integration)
   - [Kilocode Integration](#kilocode-integration)
@@ -68,6 +72,35 @@ charm-local-llm/
 - **Cleans up Kilocode config** (`~/.config/kilo/kilo.json`) by removing unsupported `indexing` blocks
 - Generates `CRUSH.md` and `AGENTS.md` project context files
 - Manages Ollama systemd service lifecycle
+
+
+## Enterprise, High-Side & Secure Regulatory Compliance Architecture
+
+`keverall/charm-local-llm` (KevCharm) is a compiled, high-performance Rust proxy and orchestration layer explicitly engineered to deliver secure, internet-independent developer AI tools. This repository completely supersedes older Bash/Ollama standalone scripts by shifting execution to a memory-safe, compiled runtime. 
+
+It is designed specifically to pass rigorous code validation audits inside **completely air-gapped, zero-trust, and high-side (TS/SC/Secure-grade) secure enclaves**.
+
+### Key Security & Architectural Safeguards
+
+- **Native Memory Safety & SAST Compliance**: Built entirely in Rust, the proxy layer provides structural compile-time guarantees against memory corruption, buffer overflows, and thread-safety vulnerabilities, allowing the binary to cleanly clear automated defense static application security testing (SAST) gates.
+- **Telemetry Interception & Cloud Decoupling**: Commercial IDE code assistants and development extensions are hardcoded to hit public web endpoints. KevCharm intercepts these outbound HTTP/gRPC requests at the runtime layer, stripping telemetry and forcing data payloads to route strictly to localized, offline inference models (such as quantized `Qwen` running on locked down local only Ollama local with the Ollama cloud end point access removed and overridden).
+- **Deterministic Local Execution Loop**: The application entirely eliminates external DNS lookups and WAN interface bindings. It forces the inference loop to communicate over local UNIX domain sockets or strict loopback addresses (`127.0.0.1`), ensuring zero lateral data leakage across adjacent networks.
+- **Offline Bootstrapping via Static Ingestion**: Rather than pulling model manifests dynamically off the web, the system handles model weights via static local paths. In a secure AWS environment, this allows the system to initialize entirely offline, pulling encrypted model layers from private S3 buckets over internal VPC Gateway Endpoints.
+
+### Enterprise Infrastructure Mapping
+
+The local physical verification baseline for KevCharm maps directly to secure cloud enterprise hardware equivalents:
+
+| Local Validation Tier | Classified Cloud Equivalent | Compliance Control Met |
+| :--- | :--- | :--- |
+| **Intel i9 Core Compute** | AWS EC2 (Compute-Optimized) | Independent Local Orchestration |
+| **NVIDIA RTX 4090 GPU** | AWS EC2 G-Family / P-Family | High-Performance Offline Inference |
+| **Rust Compiled Binary** | Hardened Target Container / AMI | Zero-Dependency Runtime Stability |
+| **Local Interception Proxy** | Isolated Private Subnet Configuration | Zero Telemetry / Exfiltration Prevention |
+
+### Architectural Status
+
+⚠️ **Deprecation Notice:** This Rust-based orchestration system completely supersedes and deprecates the legacy Bash-based `keverall/ollama` repository. All future development, hardening, and high-side compliance integrations are maintained natively within this repository.
 
 ## Local Models (RTX 4090, 24GB VRAM)
 
