@@ -145,27 +145,34 @@ run: ## Run the CLI: make run ARGS="start --platform-override cachyos"
 # `make sod` is the kcharm equivalent of the Ollama repo's sod.sh: it refreshes
 # dependencies, rebuilds kcharm, then runs `kcharm start` which brings up Ollama
 # + models + Qdrant and regenerates the Crush/Kilo/AGENTS configs for local
-# Ollama. Run `make bootstrap` once (with sudo) to install the systemd unit,
-# passwordless sudo, and desktop autostart — after that the Ollama repo is
-# redundant and can be deleted.
+# Ollama. `make sod` NEVER writes /etc/sudoers (guarded in code) so it is safe
+# to run repeatedly. Run `make bootstrap` once (with sudo) to install the
+# systemd unit, a syntax-checked passwordless-sudo drop-in, and desktop
+# autostart — after that the Ollama repo is redundant and can be deleted.
 .PHONY: sod bootstrap
 
-sod: ## Start-of-day: update deps, build, then kcharm start (env + configs)
+sod: ## Start-of-day: update deps, build, install, then kcharm start
 	@$(MAKE) deps-update
 	@$(MAKE) build
+	@$(MAKE) install
 	@command -v kcharm >/dev/null 2>&1 && kcharm start || $(CARGO) run --profile $(PROFILE) -- start
 
 bootstrap: ## One-time OS bootstrap: systemd unit, passwordless sudo, autostart
 	@command -v kcharm >/dev/null 2>&1 && kcharm service install || $(CARGO) run --profile $(PROFILE) -- service install
 
 # ─── Cleanup ──────────────────────────────────────────────────────────────────
-.PHONY: clean clean-all
+.PHONY: clean clean-all model-cleardown
 
 clean: ## Remove build artifacts (cargo clean)
 	$(CARGO) clean
 
 clean-all: clean ## Also remove the target directory
 	rm -rf target/
+
+model-cleardown: ## Stop and remove all running Ollama models from VRAM and store
+	@for m in $$(ollama ps 2>/dev/null | awk 'NR>1 {print $$1}'); do echo "stopping: $$m" && ollama stop "$$m" 2>/dev/null || true; done
+	@for m in $$(ollama list 2>/dev/null | awk 'NR>1 {print $$1}'); do echo "removing: $$m" && ollama rm "$$m" 2>/dev/null || true; done
+	@echo "done"
 
 # ─── CI / Aggregates ──────────────────────────────────────────────────────────
 .PHONY: ci all pre-commit

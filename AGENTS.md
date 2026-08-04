@@ -53,7 +53,7 @@ Override example: `kcharm start --platform macos-m5-32gb`
 
 - **Current platform**: `cachyos` (`cachyos-i9-32gb-nvidia-4090`)
 - **Memory/GPU**: NVIDIA RTX 4090 (24GB VRAM)
-- **Primary coding model**: `gemma4:26b-devops`
+- **Primary coding model**: `qwen3-coder:30b-gpu`
 - **Quick model**: `devstral-small-2-gpu`
 - **Embeddings**: `nomic-embed-text` (768 dims)
 - **Ollama**: <http://localhost:11434>
@@ -65,7 +65,7 @@ Override example: `kcharm start --platform macos-m5-32gb`
 `kcharm start` generates `~/.config/crush/crush.json`:
 
 - **Provider**: `ollama` at <http://localhost:11434/v1/> with `discover_models: true`
-- **large + medium** → `gemma4:26b-devops` (8192 max tokens)
+- **large + medium** → `qwen3-coder:30b-gpu` (8192 max tokens)
 - **small** → `devstral-small-2-gpu` (4096 max tokens)
 - **Context paths**: CRUSH.md, AGENTS.md, .clinerules
 
@@ -76,7 +76,7 @@ Also generates `CRUSH.md` in the project root as model context for Crush.
 `kcharm start` (and `kcharm kilo init`) writes `AGENTS.md` in the project root as context for Kilocode and patches `~/.config/kilo/kilo.json`:
 
 - Registers an `Ollama Local (FREE)` provider pointing at the local Ollama endpoint (`http://localhost:11434/v1/`) with known model aliases (including the platform devops/quick models).
-- Removes any unsupported `indexing` block.
+- Preserves and repairs the `indexing` block (Ollama `nomic-embed-text` embeddings + local Qdrant) so local semantic search keeps working.
 
 Kilocode then runs chat/inference directly against local Ollama — no external gateway, so data stays on-machine.
 

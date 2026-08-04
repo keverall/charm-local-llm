@@ -2,7 +2,7 @@
 
 ## Primary LLM
 
-- **Large/Medium**: `gemma4:26b-devops`
+- **Large/Medium**: `qwen3-coder:30b-gpu`
 - **Small/Quick**: `devstral-small-2-gpu`
 - **Provider**: Ollama Local at <http://localhost:11434/v1/>
 - **Embeddings**: `nomic-embed-text`

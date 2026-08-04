@@ -98,20 +98,14 @@ pub fn build_crush_config(config: &Config) -> CrushConfig {
         ("qwen3-coder:30b-gpu", "Qwen 3 Coder 30B GPU"),
         ("gemma4:26b-devops", "Gemma 4 26B Devops"),
         ("devstral-small-2-gpu", "Devstral Small 2 GPU"),
-        ("Qwen2.5-7B-instruct-GPU", "Qwen 2.5 7B Instruct GPU"),
-        ("qwen2.5-coder:32b-devops", "Qwen 2.5 Coder 32B DevOps"),
         ("qwen2.5-coder:14b-devops", "Qwen 2.5 Coder 14B DevOps"),
         ("qwen2.5-coder:14b-quick", "Qwen 2.5 Coder 14B Quick"),
         ("qwen2.5-coder:7b-quick", "Qwen 2.5 Coder 7B Quick"),
-        ("qwen2.5-coder:32b", "Qwen 2.5 Coder 32B"),
         ("qwen2.5-coder:14b", "Qwen 2.5 Coder 14B"),
         ("qwen2.5-coder:7b", "Qwen 2.5 Coder 7B"),
-        ("gemma4:e4b", "Gemma 4 E4B"),
-        ("qwen2.5-coder:3b", "Qwen 2.5 Coder 3B Quick"),
-        ("llama3.1:8b", "Llama 3.1 8B"),
+        ("qwen3.6:27b-instruct-q4_K_M-devops", "Qwen 3.6 27B DevOps"),
         ("nomic-embed-text", "Nomic Embed Text"),
         ("nomic-embed-text:latest", "Nomic Embed Text"),
-        ("snowflake-arctic-embed", "Snowflake Arctic Embed"),
     ];
 
     let label = |id: &str| {

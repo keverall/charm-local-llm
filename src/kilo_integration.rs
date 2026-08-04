@@ -35,11 +35,44 @@ pub fn verify_kilo_config_from_path(
     let json: Value = serde_json::from_str(&content)?;
     let mut issues = Vec::new();
 
-    if json.get("indexing").is_some() {
-        issues.push(
-            "indexing property is not supported by the Kilo schema; run 'kcharm kilo init' to remove it"
-                .into(),
-        );
+    if let Some(idx) = json.get("indexing") {
+        let valid = idx.get("enabled").is_some()
+            && idx.get("provider").is_some()
+            && idx.get("model").is_some()
+            && idx.get("qdrant").is_some();
+        if !valid {
+            issues.push(
+                "indexing block is incomplete (needs enabled/provider/model/qdrant); run 'kcharm kilo init' to repair it"
+                    .into(),
+            );
+        }
+    }
+
+    // Check for stale num_gpu / numeric options in provider model entries
+    if let Some(provider) = json
+        .get("provider")
+        .and_then(|p| p.get("Ollama Local (FREE)"))
+    {
+        if let Some(models) = provider.get("models").and_then(|m| m.as_object()) {
+            for (id, entry) in models {
+                if let Some(entry_obj) = entry.as_object() {
+                    for bad_key in [
+                        "num_gpu",
+                        "num_batch",
+                        "num_thread",
+                        "num_ctx",
+                        "num_predict",
+                    ] {
+                        if entry_obj.contains_key(bad_key) {
+                            issues.push(format!(
+                                "model '{}' has invalid '{}' option (must be removed; it causes 'must be of type integer' API errors). Run 'kcharm kilo init' to fix",
+                                id, bad_key
+                            ));
+                        }
+                    }
+                }
+            }
+        }
     }
 
     Ok(KiloConfigStatus {
@@ -164,7 +197,7 @@ Also generates `CRUSH.md` in the project root as model context for Crush.
 `kcharm start` (and `kcharm kilo init`) writes `AGENTS.md` in the project root as context for Kilocode and patches `~/.config/kilo/kilo.json`:
 
 - Registers an `Ollama Local (FREE)` provider pointing at the local Ollama endpoint (`http://localhost:{port}/v1/`) with known model aliases (including the platform devops/quick models).
-- Removes any unsupported `indexing` block.
+- Preserves and repairs the `indexing` block (Ollama `nomic-embed-text` embeddings + local Qdrant) so local semantic search keeps working.
 
 Kilocode then runs chat/inference directly against local Ollama — no external gateway, so data stays on-machine.
 
@@ -210,12 +243,19 @@ pub fn write_agents_md(config: &Config, project_root: &Path) -> anyhow::Result<P
     Ok(path)
 }
 
-pub fn patch_kilo_indexing(config: &Config) -> anyhow::Result<bool> {
+pub fn patch_kilo_indexing(
+    config: &Config,
+    available_models: Option<&[String]>,
+) -> anyhow::Result<bool> {
     let path = kilo_config_path();
-    patch_kilo_indexing_at_path(&path, config)
+    patch_kilo_indexing_at_path(&path, config, available_models)
 }
 
-pub fn patch_kilo_indexing_at_path(path: &Path, config: &Config) -> anyhow::Result<bool> {
+pub fn patch_kilo_indexing_at_path(
+    path: &Path,
+    config: &Config,
+    available_models: Option<&[String]>,
+) -> anyhow::Result<bool> {
     if !path.exists() {
         warn!("kilo.json not found at {}, skipping patch", path.display());
         return Ok(false);
@@ -230,12 +270,12 @@ pub fn patch_kilo_indexing_at_path(path: &Path, config: &Config) -> anyhow::Resu
 
     let mut changed = false;
 
-    if obj.remove("indexing").is_some() {
-        info!("kilo.json cleaned up: removed unsupported indexing block");
+    if repair_kilo_indexing(obj, config) {
+        info!("kilo.json: preserved/repaired indexing block (Ollama + Qdrant)");
         changed = true;
     }
 
-    if patch_kilo_providers(obj, config)? {
+    if patch_kilo_providers(obj, config, available_models)? {
         changed = true;
     }
 
@@ -248,32 +288,341 @@ pub fn patch_kilo_indexing_at_path(path: &Path, config: &Config) -> anyhow::Resu
     Ok(changed)
 }
 
-fn patch_kilo_providers(
-    obj: &mut serde_json::Map<String, Value>,
-    config: &Config,
-) -> anyhow::Result<bool> {
-    let ollama_base = format!("http://localhost:{}/v1/", config.ollama_port);
+/// Return a human-readable display name for a model ID, using a known mapping
+/// with the raw ID as a fallback for unrecognised models.
+fn model_display_name(id: &str) -> String {
+    let known: &[(&str, &str)] = &[
+        ("qwen3-coder:30b-gpu", "Qwen 3 Coder 30B GPU"),
+        ("qwen3-coder:30b", "Qwen 3 Coder 30B"),
+        ("qwen3.6:27b-instruct-q4_K_M-devops", "Qwen 3.6 27B DevOps"),
+        ("gemma4:26b-devops", "Gemma 4 26B Devops"),
+        ("gemma4:26b", "Gemma 4 26B"),
+        ("devstral-small-2-gpu", "Devstral Small 2 GPU"),
+        ("devstral-small-2", "Devstral Small 2"),
+        ("devstral-small-2:latest", "Devstral Small 2"),
+        ("qwen2.5-coder:14b-devops", "Qwen 2.5 Coder 14B DevOps"),
+        ("qwen2.5-coder:14b-quick", "Qwen 2.5 Coder 14B Quick"),
+        ("qwen2.5-coder:7b-quick", "Qwen 2.5 Coder 7B Quick"),
+        ("qwen2.5-coder:14b", "Qwen 2.5 Coder 14B"),
+        ("qwen2.5-coder:7b", "Qwen 2.5 Coder 7B"),
+        ("nomic-embed-text", "Nomic Embed Text"),
+        ("nomic-embed-text:latest", "Nomic Embed Text"),
+    ];
 
-    let ollama_provider = json!({
+    for (k, v) in known {
+        if *k == id {
+            return (*v).to_string();
+        }
+    }
+
+    id.to_string()
+}
+
+/// Platform-specific fallback model IDs used when Ollama is not reachable.
+fn platform_known_models(platform: Platform) -> Vec<&'static str> {
+    match platform {
+        Platform::CachyOS | Platform::Linux | Platform::Unknown => {
+            vec![
+                "qwen3-coder:30b-gpu",
+                "gemma4:26b-devops",
+                "devstral-small-2-gpu",
+                "nomic-embed-text",
+            ]
+        }
+        Platform::MacOS | Platform::MacOSM424Gb | Platform::MacOSM524Gb => {
+            vec![
+                "qwen2.5-coder:14b-devops",
+                "qwen2.5-coder:7b-quick",
+                "nomic-embed-text",
+            ]
+        }
+        Platform::MacOSM432Gb => {
+            vec![
+                "qwen3.6:27b-instruct-q4_K_M-devops",
+                "qwen2.5-coder:7b-quick",
+                "nomic-embed-text",
+            ]
+        }
+        Platform::MacOSM532Gb => {
+            vec![
+                "qwen3.6:27b-instruct-q4_K_M-devops",
+                "qwen2.5-coder:14b-quick",
+                "nomic-embed-text",
+            ]
+        }
+    }
+}
+
+/// Strip the trailing ``:latest`` tag so that ``nomic-embed-text`` and
+/// ``nomic-embed-text:latest`` collapse to a single entry.
+fn normalize_model_name(name: &str) -> String {
+    name.strip_suffix(":latest")
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| name.to_string())
+}
+
+/// Best-effort query of Ollama ``/api/tags`` to return the normalised,
+/// de-duplicated list of currently-pulled model IDs.
+pub fn fetch_available_models(base_url: &str) -> Vec<String> {
+    let url = format!("{}/api/tags", base_url.trim_end_matches('/'));
+    let client = match reqwest::blocking::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+    {
+        Ok(c) => c,
+        Err(_) => return vec![],
+    };
+
+    let resp = match client.get(&url).send() {
+        Ok(r) => r,
+        Err(_) => return vec![],
+    };
+
+    let body: serde_json::Value = match resp.json() {
+        Ok(b) => b,
+        Err(_) => return vec![],
+    };
+
+    let mut seen = std::collections::HashSet::new();
+    let mut models: Vec<String> = Vec::new();
+    if let Some(arr) = body.get("models").and_then(|m| m.as_array()) {
+        for m in arr {
+            if let Some(name) = m.get("name").and_then(|v| v.as_str()) {
+                let norm = normalize_model_name(name);
+                if seen.insert(norm.clone()) {
+                    models.push(norm);
+                }
+            }
+        }
+    }
+    models
+}
+
+/// Build the ``Ollama Local (FREE)`` provider JSON object. When ``available``
+/// is provided and non-empty the model list is synced to the models currently
+/// pulled in Ollama (de-duplicated, ``num_gpu``/invalid options excluded).
+/// Otherwise the platform's known model set is used as a fallback.
+fn build_ollama_provider(
+    ollama_base: &str,
+    available: Option<&[String]>,
+    platform: Platform,
+) -> Value {
+    let model_ids: Vec<String> = match available {
+        Some(models) if !models.is_empty() => {
+            let mut seen = HashSet::new();
+            models
+                .iter()
+                .map(|m| normalize_model_name(m))
+                .filter(|norm| seen.insert(norm.clone()))
+                .collect()
+        }
+        _ => platform_known_models(platform)
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
+    };
+
+    let mut models_obj = serde_json::Map::new();
+    for id in &model_ids {
+        models_obj.insert(id.clone(), json!({ "name": model_display_name(id) }));
+    }
+
+    json!({
         "options": {
             "baseURL": ollama_base
         },
-        "models": {
-            "qwen3-coder:30b-gpu": { "name": "Qwen 3 Coder 30B GPU" },
-            "gemma4:26b-devops": { "name": "Gemma 4 26B Devops" },
-            "devstral-small-2-gpu": { "name": "Devstral Small 2 GPU" },
-            "Qwen2.5-7B-instruct-GPU": { "name": "Qwen 2.5 7B Instruct GPU" },
-            "qwen2.5-coder:14b-devops": { "name": "Qwen 2.5 Coder 14B DevOps" },
-            "qwen2.5-coder:14b-quick": { "name": "Qwen 2.5 Coder 14B Quick" },
-            "qwen2.5-coder:7b-quick": { "name": "Qwen 2.5 Coder 7B Quick" },
-            "gemma4:e4b": { "name": "Gemma 4 E4B" },
-            "qwen2.5-coder:3b": { "name": "Qwen 2.5 Coder 3B Quick" },
-            "llama3.1:8b": { "name": "Llama 3.1 8B" },
-            "nomic-embed-text:latest": { "name": "Nomic Embed Text" },
-            "nomic-embed-text": { "name": "Nomic Embed Text" },
-            "snowflake-arctic-embed": { "name": "Snowflake Arctic Embed" }
+        "models": models_obj
+    })
+}
+
+/// Remove any stale ``num_gpu`` or other numeric options from model entries
+/// in the provider's ``models`` map. Model entries should only contain a
+/// display ``name``; integer options like ``num_gpu`` cause type validation
+/// errors in the Kilocode/Ollama OpenAI-compatible API.
+fn sanitize_model_options(models_obj: &mut serde_json::Map<String, Value>) {
+    for (_id, entry) in models_obj.iter_mut() {
+        if let Some(entry_obj) = entry.as_object_mut() {
+            entry_obj.remove("num_gpu");
+            entry_obj.remove("num_batch");
+            entry_obj.remove("num_thread");
+            entry_obj.remove("num_ctx");
+            entry_obj.remove("num_predict");
+            entry_obj.remove("options");
+        }
+    }
+}
+
+/// Strip ``//`` line comments and ``/* */`` block comments from JSONC content,
+/// being careful not to touch comment-like sequences inside string values.
+fn strip_jsonc_comments(content: &str) -> String {
+    let mut result = String::with_capacity(content.len());
+    let mut in_string = false;
+    let mut chars = content.chars().peekable();
+
+    while let Some(ch) = chars.next() {
+        if in_string {
+            result.push(ch);
+            if ch == '\\' && chars.peek().is_some() {
+                let next = chars.next().unwrap();
+                result.push(next);
+            } else if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+
+        if ch == '"' {
+            in_string = true;
+            result.push(ch);
+            continue;
+        }
+
+        if ch == '/' {
+            match chars.peek() {
+                Some('/') => {
+                    chars.next();
+                    for c in chars.by_ref() {
+                        if c == '\n' {
+                            result.push(c);
+                            break;
+                        }
+                    }
+                }
+                Some('*') => {
+                    chars.next();
+                    let mut prev = ' ';
+                    for c in chars.by_ref() {
+                        if prev == '*' && c == '/' {
+                            break;
+                        }
+                        prev = c;
+                    }
+                }
+                _ => result.push(ch),
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+
+    result
+}
+
+/// Preserve and repair the ``indexing`` block so local semantic search works.
+///
+/// The supported schema uses the local Ollama embeddings model + Qdrant. We do
+/// NOT delete this block (a previous version did, which silently broke
+/// indexing on every `kcharm start`). Instead we ensure it is present and
+/// filled with the correct, project-matched values, fixing any partial or
+/// stale entry in place.
+fn repair_kilo_indexing(obj: &mut serde_json::Map<String, Value>, config: &Config) -> bool {
+    // Match the exact schema the user wants (and Kilo supports).
+    let ollama_base = format!("http://localhost:{}/", config.ollama_port);
+    let qdrant_url = format!("http://localhost:{}/", config.qdrant_port);
+
+    let expected = json!({
+        "enabled": true,
+        "provider": "ollama",
+        "model": "nomic-embed-text",
+        "dimension": 768,
+        "ollama": {
+            "baseUrl": ollama_base
+        },
+        "vectorStore": "qdrant",
+        "qdrant": {
+            "url": qdrant_url
         }
     });
+
+    let existing = obj.get("indexing").cloned();
+    let mut idx = existing.unwrap_or_else(|| json!({}));
+    let idx_obj = match idx.as_object_mut() {
+        Some(o) => o,
+        None => {
+            obj.insert("indexing".to_string(), expected.clone());
+            return true;
+        }
+    };
+
+    let mut changed = false;
+    for (k, v) in expected.as_object().unwrap() {
+        match idx_obj.get(k) {
+            // Already correct (deep equal) — leave it untouched.
+            Some(cur) if cur == v => {}
+            // Present but wrong/null/missing — repair it.
+            _ => {
+                idx_obj.insert(k.clone(), v.clone());
+                changed = true;
+            }
+        }
+    }
+    // Normalise enabled to bool true when it was missing/null.
+    if idx_obj.get("enabled").is_none_or(|v| v.is_null()) {
+        idx_obj.insert("enabled".to_string(), json!(true));
+        changed = true;
+    }
+
+    obj.insert("indexing".to_string(), Value::Object(idx_obj.clone()));
+    changed
+}
+
+/// Clean up a project-level ``.kilo/kilo.jsonc`` file. Indexing is supported by
+/// Kilo (Ollama embeddings + Qdrant), so we preserve and repair it rather than
+/// remove it. Returns true if the file was modified.
+pub fn clean_project_kilo_config(project_root: &Path, config: &Config) -> anyhow::Result<bool> {
+    let path = project_root.join(".kilo").join("kilo.jsonc");
+    if !path.exists() {
+        return Ok(false);
+    }
+
+    let content = std::fs::read_to_string(&path)?;
+    let stripped = strip_jsonc_comments(&content);
+    let mut json: Value = match serde_json::from_str(&stripped) {
+        Ok(v) => v,
+        Err(_) => {
+            info!(
+                "kilo.jsonc at {} is not valid JSON; skipping cleanup",
+                path.display()
+            );
+            return Ok(false);
+        }
+    };
+
+    let obj = match json.as_object_mut() {
+        Some(obj) => obj,
+        None => return Ok(false),
+    };
+
+    let mut changed = false;
+    if repair_kilo_indexing(obj, config) {
+        info!("Preserved/repaired indexing block in {}", path.display());
+        changed = true;
+    }
+
+    if changed {
+        let new_content = serde_json::to_string_pretty(&json)?;
+        std::fs::write(&path, new_content)?;
+    }
+
+    Ok(changed)
+}
+
+fn patch_kilo_providers(
+    obj: &mut serde_json::Map<String, Value>,
+    config: &Config,
+    available_models: Option<&[String]>,
+) -> anyhow::Result<bool> {
+    let ollama_base = format!("http://localhost:{}/v1/", config.ollama_port);
+    let mut ollama_provider =
+        build_ollama_provider(&ollama_base, available_models, config.platform);
+
+    // Defensive: strip any stale num_gpu/numeric options from model entries
+    if let Some(models) = ollama_provider
+        .get_mut("models")
+        .and_then(|m| m.as_object_mut())
+    {
+        sanitize_model_options(models);
+    }
 
     let provider = obj.entry("provider").or_insert_with(|| json!({}));
     if let Some(provider_obj) = provider.as_object_mut() {
@@ -286,8 +635,16 @@ fn patch_kilo_providers(
 
         let existing = provider_obj.get("Ollama Local (FREE)");
         if existing.is_none() || existing != Some(&ollama_provider) {
+            let model_count = ollama_provider
+                .get("models")
+                .and_then(|m| m.as_object())
+                .map(|m| m.len())
+                .unwrap_or(0);
             provider_obj.insert("Ollama Local (FREE)".to_string(), ollama_provider);
-            info!("Added Ollama Local (FREE) provider to kilo.json");
+            info!(
+                "Updated Ollama Local (FREE) provider in kilo.json ({} models)",
+                model_count
+            );
             changed = true;
         }
 

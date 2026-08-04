@@ -109,9 +109,7 @@ The local physical verification baseline for KevCharm maps directly to secure cl
 | `gemma4:26b-devops` | Primary DevOps — coding, complex reasoning | ~17GB |
 | `qwen3-coder:30b-gpu` | Coding — general purpose coder | ~18GB |
 | `devstral-small-2-gpu` | Quick — fast responses, simple tasks | ~15GB |
-| `Qwen2.5-7B-instruct-GPU` | Lightweight general-purpose | ~5GB |
 | `nomic-embed-text` | Embeddings for semantic search (768 dims) | ~300MB |
-| `snowflake-arctic-embed` | Alternative embeddings model | ~300MB |
 
 ## Crush Integration
 
@@ -129,7 +127,7 @@ Also generates `CRUSH.md` in the project root with model info and guidelines for
 
 `kcharm start` (and `kcharm kilo init`) writes `AGENTS.md` in the project root with project context that Kilocode reads automatically, and patches `~/.config/kilo/kilo.json`:
 
-- Registers an `Ollama Local (FREE)` provider pointing at the local Ollama endpoint (`http://localhost:11434/v1/`) with known model aliases (including the platform devops/quick models).
+- Registers an `Ollama Local (FREE)` provider pointing at the local Ollama endpoint (`http://localhost:11434/v1/`) with models synced to the models currently available in Ollama (queried via `/api/tags`).
 - Removes any unsupported `indexing` block.
 
 Kilocode then runs chat/inference directly against local Ollama — no external gateway, so data stays on-machine.
@@ -232,6 +230,47 @@ make kilo-status  # Show Kilo config status
 - Rust (stable) with rustfmt and clippy
 - Ollama installed and on PATH
 - Optional: Docker + docker-compose (for Qdrant)
+
+### Passwordless Sudo (Linux / CachyOS)
+
+On Linux, `kcharm` manages the Ollama systemd service. Several subcommands require
+elevated privileges. Run `service install` **once** with sudo to install a
+restrictive sudoers file, then all subsequent commands work without a password:
+
+```bash
+# One-time setup (requires your password, use full path since kcharm
+# is not in sudo's secure_path):
+sudo ~/.local/bin/kcharm service install
+
+# After that, these run passwordless:
+kcharm start      # systemctl start/stop/daemon-reload + env file
+kcharm stop
+kcharm status
+kcharm service install   # re-run if you changed the unit file or config
+make sod           # build + start
+```
+
+**Safety:** `kcharm` never writes `/etc/sudoers` and never grants passwordless
+write access to the sudoers file itself. The generated drop-in at
+`/etc/sudoers.d/ollama` is syntax-checked with `visudo -cf` and installed
+atomically, so a malformed file can never lock out `sudo`. The only
+passwordless rules are the specific `systemctl` and `/etc/default/ollama` /
+systemd unit file writes that `kcharm` needs. If you prefer to configure
+manually as root:
+
+```bash
+# Create /etc/sudoers.d/ollama with (replace keverall with your username):
+# keverall ALL=(ALL) NOPASSWD: /usr/bin/systemctl start ollama
+# keverall ALL=(ALL) NOPASSWD: /usr/bin/systemctl stop ollama
+# keverall ALL=(ALL) NOPASSWD: /usr/bin/systemctl disable ollama
+# keverall ALL=(ALL) NOPASSWD: /usr/bin/systemctl enable ollama
+# keverall ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload
+# keverall ALL=(ALL) NOPASSWD: /usr/bin/systemctl is-active --quiet ollama
+# keverall ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/default/ollama
+# keverall ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/systemd/system/ollama.service
+# keverall ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/systemd/system/ollama.service.d/cachyos-nvidia.conf
+# chmod 440 /etc/sudoers.d/ollama
+```
 
 ## License
 

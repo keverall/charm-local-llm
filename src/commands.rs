@@ -45,20 +45,35 @@ fn run_systemctl(config: &Config, args: &[&str]) -> anyhow::Result<bool> {
 
 /// Run a command via sudo (non-interactive first; falls back to interactive
 /// sudo only when a TTY is available). Returns true if the command succeeded.
+///
+/// The `sudo` child is waited on in a detached OS thread so it never blocks the
+/// Tokio async runtime (which would otherwise panic on shutdown).
 fn sudo_command(args: &[&str]) -> bool {
-    let try_run = |non_interactive: bool| -> Option<bool> {
-        let mut cmd = ProcessCommand::new("sudo");
-        if non_interactive {
-            cmd.arg("-n");
-        }
-        cmd.args(args);
-        cmd.status().ok().map(|s| s.success())
-    };
-    if let Some(ok) = try_run(true) {
+    let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+    // Try non-interactive first on a detached thread (never inside the async
+    // runtime, which would panic on shutdown).
+    let ni_args = args.clone();
+    let ni = std::thread::spawn(move || {
+        ProcessCommand::new("sudo")
+            .arg("-n")
+            .args(&ni_args)
+            .status()
+            .ok()
+            .map(|s| s.success())
+    });
+    if let Ok(Some(ok)) = ni.join() {
         return ok;
     }
     if unsafe { libc::isatty(libc::STDIN_FILENO) } == 1 {
-        if let Some(ok) = try_run(false) {
+        let i_args = args.clone();
+        let inter = std::thread::spawn(move || {
+            ProcessCommand::new("sudo")
+                .args(&i_args)
+                .status()
+                .ok()
+                .map(|s| s.success())
+        });
+        if let Ok(Some(ok)) = inter.join() {
             return ok;
         }
     }
@@ -82,7 +97,13 @@ fn command_exists(cmd: &str) -> bool {
 
 /// Write a file to a privileged location (requires root or sudo). Uses `sudo
 /// tee` when not running as root. `mode` is applied (e.g. 0o644, 0o440).
+///
+/// The `sudo tee` child is spawned and waited on inside a *detached* OS thread
+/// (never via `tokio::task::spawn_blocking`) so it can never run inside the
+/// Tokio async runtime — otherwise waiting on the child triggers
+/// "Cannot drop a runtime in a context where blocking is not allowed".
 fn write_privileged_file(path: &Path, content: &str, mode: u32) -> bool {
+    forbid_sudoers_write(path);
     if unsafe { libc::geteuid() } == 0 {
         if std::fs::write(path, content).is_ok() {
             #[cfg(unix)]
@@ -95,33 +116,111 @@ fn write_privileged_file(path: &Path, content: &str, mode: u32) -> bool {
         return false;
     }
 
-    let Some(p) = path.to_str() else {
+    let Some(p) = path.to_str().map(|s| s.to_string()) else {
         return false;
     };
-    use std::io::Write;
-    let mut child = match ProcessCommand::new("sudo")
-        .args(["tee", p])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    {
-        Ok(c) => c,
-        Err(_) => return false,
+    let content = content.as_bytes().to_vec();
+    let chmod_mode = format!("{:o}", mode);
+
+    // Run the blocking sudo work off the async runtime entirely.
+    let handle = std::thread::spawn(move || {
+        use std::io::Write;
+        let mut child = match ProcessCommand::new("sudo")
+            .args(["tee", &p])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(_) => return false,
+        };
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(&content);
+        }
+        let ok = child.wait().map(|s| s.success()).unwrap_or(false);
+        if ok {
+            let _ = ProcessCommand::new("sudo")
+                .args(["chmod", &chmod_mode, &p])
+                .status();
+        }
+        ok
+    });
+    handle.join().unwrap_or(false)
+}
+
+/// Best-effort: make sure the Ollama models directory exists and is owned by
+/// the user Ollama actually runs as, so the server can write its blobs.
+///
+/// On Linux the systemd service runs as the `ollama` user, so the dir must be
+/// owned by `ollama:ollama`; otherwise the service dies with
+/// "mkdir .../blobs: permission denied". We create + chown it via `sudo`
+/// (best-effort — warns and continues if sudo/root is unavailable). This is
+/// never a sudoers path, so the `forbid_sudoers_write` guard is unaffected.
+fn ensure_ollama_models_dir(config: Config) {
+    let Some(models) = &config.ollama_models_path else {
+        return;
     };
-    if let Some(mut stdin) = child.stdin.take() {
-        let _ = stdin.write_all(content.as_bytes());
+    if models.exists() {
+        // Already present; only (re)own if it isn't traversable/writable.
+        if std::fs::metadata(models)
+            .map(|m| m.is_dir())
+            .unwrap_or(false)
+        {
+            return;
+        }
     }
-    let ok = child.wait().map(|s| s.success()).unwrap_or(false);
-    if ok {
-        let _ = ProcessCommand::new("sudo")
-            .args(["chmod", &format!("{:o}", mode), p])
-            .status();
-        let _ = ProcessCommand::new("sudo")
-            .args(["chown", "root:root", p])
-            .status();
+    let models_str = match models.to_str() {
+        Some(s) => s.to_string(),
+        None => return,
+    };
+    // Determine the service user. systemd unit runs as `ollama`; fall back to
+    // the current user when running ollama directly.
+    let service_user: String = if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
+        "ollama".to_string()
+    } else {
+        "keverall".to_string()
+    };
+    info!(
+        "Ensuring Ollama models dir {} exists and is owned by {} (best-effort)",
+        models_str, service_user
+    );
+    // Copies kept for the warning message below (the closure moves the originals).
+    let warn_models = models_str.clone();
+    let warn_user = service_user.clone();
+    // mkdir -p, then chown to the service user (group = same).
+    let ok = std::thread::spawn(move || {
+        let mk = ProcessCommand::new("sudo")
+            .args(["mkdir", "-p", &models_str])
+            .status()
+            .ok()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !mk {
+            return false;
+        }
+        ProcessCommand::new("sudo")
+            .args([
+                "chown",
+                "-R",
+                &format!("{}:{}", service_user, service_user),
+                &models_str,
+            ])
+            .status()
+            .ok()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    })
+    .join()
+    .unwrap_or(false);
+    if !ok {
+        warn!(
+            "Could not prepare Ollama models dir {} (needs sudo/root). \
+             If Ollama fails to start with a 'permission denied' on its blobs dir, run: \
+             sudo mkdir -p {} && sudo chown -R {}:{} {}",
+            warn_models, warn_models, warn_user, warn_user, warn_models
+        );
     }
-    ok
 }
 
 /// Copy the bundled `systemd/ollama.service` into `/etc/systemd/system/`,
@@ -187,8 +286,43 @@ fn install_systemd_unit(config: &Config) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// The single, exact sudoers drop-in that kcharm is allowed to manage.
+/// kcharm MUST NEVER write /etc/sudoers itself, nor any other drop-in. A
+/// malformed sudoers file locks out sudo for the whole machine (and can break
+/// graphics/driver config), so this path is the only sanctioned target.
+const KCHARM_SUDOERS_PATH: &str = "/etc/sudoers.d/ollama";
+
+/// Hard guard: kcharm MUST NEVER write /etc/sudoers or any sudoers drop-in
+/// OTHER than the one kcharm-managed file. A malformed sudoers file locks out
+/// sudo for the whole machine. Enforced at runtime. Do NOT weaken this.
+fn forbid_sudoers_write(path: &Path) {
+    let p = path.to_string_lossy().to_string();
+    let is_kcharm_file = p == KCHARM_SUDOERS_PATH;
+    let targets_sudoers = p == "/etc/sudoers"
+        || p == "/private/etc/sudoers"
+        || p.starts_with("/etc/sudoers.d/")
+        || p.starts_with("/private/etc/sudoers.d/");
+    if targets_sudoers && !is_kcharm_file {
+        panic!(
+            "REFUSING to write sudoers path ({}): only {} may be managed by kcharm. \
+             Writing elsewhere risks locking out sudo.",
+            p, KCHARM_SUDOERS_PATH
+        );
+    }
+}
+
 /// Install a restrictive passwordless-sudoers file for Ollama service
-/// management (`/etc/sudoers.d/ollama`), validated with `visudo -cf`.
+/// management (`/etc/sudoers.d/ollama`).
+///
+/// SAFETY:
+/// - The content is syntax-checked with `visudo -cf` BEFORE it is ever written,
+///   so an invalid file can never land and lock out sudo.
+/// - It is installed atomically via `sudo install` (single syscall that sets
+///   owner/perms), NOT `sudo tee` (which truncates first and can leave an empty
+///   or half-written file).
+/// - It deliberately does NOT grant passwordless `tee`/`chmod` on the sudoers
+///   file itself, so nothing (including an AI) can later rewrite sudoers without
+///   a password + visudo validation.
 fn setup_passwordless_sudo(config: &Config) -> anyhow::Result<()> {
     if !matches!(config.platform, Platform::CachyOS | Platform::Linux) {
         return Ok(());
@@ -207,25 +341,27 @@ fn setup_passwordless_sudo(config: &Config) -> anyhow::Result<()> {
         "# ollama: Passwordless sudo for Ollama service management\n\
          # Generated by kcharm on {}\n\
          # Security: restrictive NOPASSWD rules (least privilege)\n\
+         # --- systemctl management ---\n\
          {} ALL=(ALL) NOPASSWD: {} start ollama\n\
          {} ALL=(ALL) NOPASSWD: {} stop ollama\n\
          {} ALL=(ALL) NOPASSWD: {} disable ollama\n\
          {} ALL=(ALL) NOPASSWD: {} enable ollama\n\
          {} ALL=(ALL) NOPASSWD: {} daemon-reload\n\
-         {} ALL=(ALL) NOPASSWD: {} is-active --quiet ollama\n",
+         {} ALL=(ALL) NOPASSWD: {} is-active --quiet ollama\n\
+         # --- privileged file writes (for kcharm service install) ---\n\
+         {} ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/default/ollama\n\
+         {} ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/systemd/system/ollama.service\n\
+         {} ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/systemd/system/ollama.service.d/cachyos-nvidia.conf\n",
         chrono::Utc::now().format("%Y-%m-%d"),
+        target_user, systemctl,
+        target_user, systemctl,
+        target_user, systemctl,
+        target_user, systemctl,
+        target_user, systemctl,
+        target_user, systemctl,
         target_user,
-        systemctl,
         target_user,
-        systemctl,
         target_user,
-        systemctl,
-        target_user,
-        systemctl,
-        target_user,
-        systemctl,
-        target_user,
-        systemctl,
     );
 
     let tmp = std::env::temp_dir().join(format!("kcharm-sudoers-{}.tmp", std::process::id()));
@@ -236,25 +372,46 @@ fn setup_passwordless_sudo(config: &Config) -> anyhow::Result<()> {
         .map(|s| s.success())
         .unwrap_or(false);
     if !valid {
-        warn!("Generated sudoers syntax invalid; skipping passwordless sudo setup");
+        warn!("Generated sudoers syntax invalid; refusing to install (sudo left untouched)");
         let _ = std::fs::remove_file(&tmp);
         return Ok(());
     }
 
-    let dest = PathBuf::from("/etc/sudoers.d/ollama");
-    if write_privileged_file(&dest, &sudoers, 0o440) {
+    forbid_sudoers_write(&PathBuf::from(KCHARM_SUDOERS_PATH));
+    let dest = PathBuf::from(KCHARM_SUDOERS_PATH);
+    if write_privileged_sudoers(&dest, &tmp) {
         info!("Passwordless sudo installed at {}", dest.display());
     } else {
         warn!(
-            "Could not install sudoers (needs root/sudo). Run 'sudo kcharm service install' or:\n  sudo cp {} {} && sudo chmod 440 {} && sudo chown root:root {}",
+            "Could not install sudoers (needs root/sudo). Run manually as root:\n  \
+             sudo install -m 0440 -o root -g root {} {}",
             tmp.display(),
-            dest.display(),
-            dest.display(),
             dest.display()
         );
     }
     let _ = std::fs::remove_file(&tmp);
     Ok(())
+}
+
+/// Atomically install a (pre-validated) sudoers file: copy the temp file to the
+/// destination with root ownership and 0440 perms in a single `sudo install`
+/// call. Never `tee` (which truncates and can corrupt sudo). Returns true on
+/// success.
+fn write_privileged_sudoers(dest: &Path, src: &Path) -> bool {
+    let Some(d) = dest.to_str() else { return false };
+    let Some(s) = src.to_str() else { return false };
+    if unsafe { libc::geteuid() } == 0 {
+        return ProcessCommand::new("install")
+            .args(["-m", "0440", "-o", "root", "-g", "root", s, d])
+            .status()
+            .map(|st| st.success())
+            .unwrap_or(false);
+    }
+    ProcessCommand::new("sudo")
+        .args(["install", "-m", "0440", "-o", "root", "-g", "root", s, d])
+        .status()
+        .map(|st| st.success())
+        .unwrap_or(false)
 }
 
 /// Create an XDG autostart entry (`~/.config/autostart/kcharm-start.desktop`)
@@ -301,8 +458,10 @@ fn bootstrap_os(config: &Config) -> anyhow::Result<()> {
     }
     println!("🔧 One-time OS bootstrap (Linux)...");
     install_systemd_unit(config)?;
-    let _ = install_systemd_env(config);
     setup_passwordless_sudo(config)?;
+    if !install_systemd_env(config) {
+        warn!("Systemd env file installation failed; Ollama may use default values");
+    }
     setup_autostart(config)?;
     println!("✅ OS bootstrap complete — the Ollama repo can now be deleted.");
     Ok(())
@@ -340,6 +499,12 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         find_ollama_bin().unwrap_or_else(|| PathBuf::from("ollama"))
     );
 
+    if let Some(ref mp) = config.ollama_models_path {
+        let mp_str = mp.to_string_lossy().to_string();
+        std::env::set_var("OLLAMA_MODELS", &mp_str);
+        println!("   OLLAMA_MODELS={}", mp_str);
+    }
+
     if args.dry_run {
         println!(
             "   [dry-run] Would export OLLAMA_HOST={}",
@@ -368,28 +533,55 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
     }
 
     // One-time OS bootstrap (idempotent, best-effort): ensure the systemd unit
-    // and env file exist before attempting to start the service.
+    // and env file exist before attempting to start the service. NOTE: this
+    // never writes /etc/sudoers (see forbid_sudoers_write) — sudoers setup is a
+    // separate, validated one-time step via `kcharm service install`.
+    // These are synchronous blocking operations, so they run inside
+    // spawn_blocking within the async body below.
+
+    // One-time OS bootstrap (idempotent, best-effort): ensure the systemd unit
+    // and env file exist. Runs in spawn_blocking because it performs blocking
+    // sudo/file I/O and `start()` itself executes inside the tokio runtime.
     if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
-        let _ = install_systemd_unit(&config);
-        let _ = install_systemd_env(&config);
+        let cfg: Config = config.clone();
+        let _ = tokio::task::spawn_blocking(move || {
+            let _ = install_systemd_unit(&cfg);
+            let _ = install_systemd_env(&cfg);
+            ensure_ollama_models_dir(cfg);
+        })
+        .await;
     }
 
-    println!("🛑 Stopping existing Ollama processes...");
+    // If Ollama is already serving, leave it alone — restarting risks a port
+    // collision and wedges `make sod`. We only (re)launch when it's down.
+    // ollama_running uses reqwest::blocking, so it must run off the async
+    // runtime (inside spawn_blocking).
+    let already_running = tokio::task::spawn_blocking(move || ollama_running(config.ollama_port))
+        .await
+        .unwrap_or(false);
+    if already_running {
+        println!(
+            "✅ Ollama already running on port {}; skipping stop/start.",
+            config.ollama_port
+        );
+    } else {
+        println!("🛑 Stopping existing Ollama processes...");
 
-    // Try systemctl stop with passwordless sudo, silently skip if not available
-    if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
-        let _ = run_systemctl(&config, &["stop", "ollama"]);
-        let _ = run_systemctl(&config, &["daemon-reload"]);
+        // Try systemctl stop with passwordless sudo, silently skip if not available
+        if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
+            let _ = run_systemctl(&config, &["stop", "ollama"]);
+            let _ = run_systemctl(&config, &["daemon-reload"]);
+        }
+
+        let _ = ProcessCommand::new("pkill")
+            .args(["-f", "ollama serve"])
+            .output();
+
+        std::thread::sleep(Duration::from_secs(2));
+        println!("✅ Previous Ollama instances stopped.");
+
+        println!("🚀 Starting Ollama server...");
     }
-
-    let _ = ProcessCommand::new("pkill")
-        .args(["-f", "ollama serve"])
-        .output();
-
-    std::thread::sleep(Duration::from_secs(2));
-    println!("✅ Previous Ollama instances stopped.");
-
-    println!("🚀 Starting Ollama server...");
     let log_dir = config.project_root.join("logs");
     std::fs::create_dir_all(&log_dir).ok();
     let log_file = log_dir.join(format!(
@@ -397,38 +589,35 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         chrono::Utc::now().format("%Y%m%d%H%M%S")
     ));
 
-    let _started_via_systemd = if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
-        let systemd_works = run_systemctl(&config, &["start", "ollama"])?;
+    if !already_running {
+        if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
+            let systemd_works = run_systemctl(&config, &["start", "ollama"])?;
 
-        if systemd_works {
-            tokio::time::sleep(Duration::from_secs(3)).await;
+            if systemd_works {
+                tokio::time::sleep(Duration::from_secs(3)).await;
 
-            let port = config.ollama_port;
-            let running = tokio::task::spawn_blocking(move || ollama_running(port))
-                .await
-                .unwrap_or(false);
+                let port = config.ollama_port;
+                let running = tokio::task::spawn_blocking(move || ollama_running(port))
+                    .await
+                    .unwrap_or(false);
 
-            if running {
-                true
+                if !running {
+                    warn!("systemctl start failed to start Ollama, falling back to direct start");
+                    let cfg = config.clone();
+                    let lf = log_file.clone();
+                    tokio::task::spawn_blocking(move || start_ollama_direct(&cfg, &lf)).await??;
+                }
             } else {
-                warn!("systemctl start failed to start Ollama, falling back to direct start");
                 let cfg = config.clone();
                 let lf = log_file.clone();
                 tokio::task::spawn_blocking(move || start_ollama_direct(&cfg, &lf)).await??;
-                false
             }
         } else {
             let cfg = config.clone();
             let lf = log_file.clone();
             tokio::task::spawn_blocking(move || start_ollama_direct(&cfg, &lf)).await??;
-            false
         }
-    } else {
-        let cfg = config.clone();
-        let lf = log_file.clone();
-        tokio::task::spawn_blocking(move || start_ollama_direct(&cfg, &lf)).await??;
-        false
-    };
+    }
 
     for attempt in 1..16 {
         let port = config.ollama_port;
@@ -499,6 +688,34 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
     println!("🔥 Warming up models...");
     let _ = warmup_models(&client, &config).await;
 
+    // Remove base models that kcharm pulled as FROM dependencies but aren't
+    // explicitly listed in DEFAULT_MODELS — keeps the store lean (only tuned
+    // modelfile models + nomic-embed-text). Best-effort; warns on failure.
+    //
+    // Ollama server sometimes appends ":latest" to a model name when listing
+    // (e.g. "foo" becomes "foo:latest"). We normalize both sides by stripping
+    // a trailing ":latest" so the comparison is robust.
+    let normalize = |name: &str| -> String {
+        if let Some(stripped) = name.strip_suffix(":latest") {
+            stripped.to_string()
+        } else {
+            name.to_string()
+        }
+    };
+    let default_set: std::collections::HashSet<String> =
+        config.default_models.iter().map(|d| normalize(d)).collect();
+    let existing = client.list_models().await.unwrap_or_default();
+    for m in &existing {
+        let is_default = default_set.contains(&normalize(&m.name));
+        if !is_default {
+            info!(
+                "Removing non-default model '{}' (base dependency cleanup)",
+                m.name
+            );
+            let _ = client.remove_model(&m.name).await;
+        }
+    }
+
     if find_docker_compose().is_some() {
         println!("🐳 Starting Qdrant...");
         let _ = start_qdrant(&config).await;
@@ -513,11 +730,22 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         Ok(path) => println!("   ✅ CRUSH.md: {}", path.display()),
         Err(e) => warn!("   Failed to write CRUSH.md: {}", e),
     }
-    match crate::kilo_integration::patch_kilo_indexing(&config) {
-        Ok(true) => println!("   ✅ Kilo config cleaned up (removed unsupported indexing block)"),
-        Ok(false) => println!("   ✅ Kilo config has no unsupported indexing block"),
+    let available_models: Vec<String> = client
+        .list_models()
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| m.name)
+        .collect();
+    match crate::kilo_integration::patch_kilo_indexing(&config, Some(&available_models)) {
+        Ok(true) => println!(
+            "   ✅ Kilo config updated (provider models synced to {} Ollama models)",
+            available_models.len()
+        ),
+        Ok(false) => println!("   ✅ Kilo config up to date"),
         Err(e) => warn!("   Failed to patch Kilo config: {}", e),
     }
+    let _ = crate::kilo_integration::clean_project_kilo_config(&config.project_root, &config);
     match crate::kilo_integration::write_agents_md(&config, &config.project_root) {
         Ok(path) => println!("   ✅ AGENTS.md: {}", path.display()),
         Err(e) => warn!("   Failed to write AGENTS.md: {}", e),
@@ -936,21 +1164,13 @@ async fn config(args: ConfigArgs, verbose: bool) -> anyhow::Result<()> {
 
 // Helpers
 
-fn install_systemd_env(config: &Config) -> anyhow::Result<()> {
+fn install_systemd_env(config: &Config) -> bool {
     if std::env::consts::OS != "linux" {
-        return Ok(());
+        return true;
     }
 
-    let env_file = if std::path::Path::new("/etc/os-release").exists() {
-        let content = std::fs::read_to_string("/etc/os-release").unwrap_or_default();
-        if content.to_lowercase().contains("cachyos") || content.to_lowercase().contains("arch") {
-            std::path::PathBuf::from("/etc/sysconfig/ollama")
-        } else {
-            std::path::PathBuf::from("/etc/default/ollama")
-        }
-    } else {
-        std::path::PathBuf::from("/etc/default/ollama")
-    };
+    let env_file = std::path::PathBuf::from("/etc/default/ollama");
+    forbid_sudoers_write(&env_file);
 
     let env_content = format!(
         "# Ollama environment configuration\n# Generated by kcharm on {}\n# Platform: {}\n\nOLLAMA_HOST={}\nOLLAMA_PORT={}\nOLLAMA_NUM_PARALLEL={}\nOLLAMA_MAX_LOADED_MODELS={}\n",
@@ -962,45 +1182,47 @@ fn install_systemd_env(config: &Config) -> anyhow::Result<()> {
         config.ollama_max_loaded_models,
     );
 
-    let final_content = if let Some(mp) = &config.ollama_models_path {
-        env_content + &format!("OLLAMA_MODELS={}\n", mp.display())
-    } else {
-        env_content
-    };
+    let mut final_content = env_content;
+    if let Some(mp) = &config.ollama_models_path {
+        final_content.push_str(&format!("OLLAMA_MODELS={}\n", mp.display()));
+    }
+
+    if let Some(gpu_layers) = config.ollama_gpu_layers {
+        final_content.push_str(&format!("OLLAMA_GPU_LAYERS={}\n", gpu_layers));
+    }
+    if let Some(fa) = config.ollama_flash_attention {
+        final_content.push_str(&format!("OLLAMA_FLASH_ATTENTION={}\n", fa));
+    }
+    final_content.push_str(&format!(
+        "OLLAMA_KV_CACHE_TYPE={}\n",
+        config.ollama_kv_cache_type
+    ));
 
     // Try to write with sudo if not root
     let is_root = unsafe { libc::geteuid() } == 0;
-    let write_result = if is_root {
-        std::fs::write(&env_file, final_content.clone())
+    let written = if is_root {
+        std::fs::write(&env_file, &final_content).is_ok()
     } else {
-        // Use sudo tee to write the file
-        let mut cmd = ProcessCommand::new("sudo");
-        cmd.args([
-            "-n",
-            "tee",
-            env_file.to_str().unwrap_or("/etc/default/ollama"),
-        ]);
-        use std::io::Write;
-        if let Ok(mut child) = cmd.stdin(Stdio::piped()).spawn() {
-            if let Some(mut stdin) = child.stdin.take() {
-                let _ = stdin.write_all(final_content.as_bytes());
-            }
-            let _ = child.wait();
-        }
-        Ok(())
+        write_privileged_file(&env_file, &final_content, 0o644)
     };
 
-    if let Err(e) = write_result {
+    if !written {
+        let env_path_str = env_file.display().to_string();
+        let bin_path = std::env::current_exe()
+            .map(|p| p.display().to_string())
+            .unwrap_or_else(|_| "kcharm".to_string());
         warn!(
-            "Could not write systemd env file (requires root/sudo): {}",
-            e
+            "Could not write systemd env file at {} (requires root/sudo). \
+             kcharm never modifies sudoers; run the equivalent as root manually if needed.",
+            env_path_str
         );
+        println!("   ⚠️  Systemd env file not installed — Ollama may run with default values");
+        println!("      One-time fix: sudo {} service install", bin_path);
+    } else {
+        info!("Systemd env file written to {}", env_file.display());
     }
 
-    let _ = ProcessCommand::new("sudo")
-        .args(["-n", "systemctl", "daemon-reload"])
-        .output();
-    Ok(())
+    written
 }
 
 async fn warmup_models(client: &OllamaClient, config: &Config) -> anyhow::Result<()> {
@@ -1012,13 +1234,6 @@ async fn warmup_models(client: &OllamaClient, config: &Config) -> anyhow::Result
     if let Some(qm) = &config.quick_model {
         if !models_to_warm.contains(qm) {
             models_to_warm.push(qm.clone());
-        }
-    }
-    for m in &config.default_models {
-        if (m.contains("30b") || m.contains("26b") || m.contains("27b"))
-            && !models_to_warm.contains(m)
-        {
-            models_to_warm.push(m.clone());
         }
     }
     for model in models_to_warm {
@@ -1113,11 +1328,6 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
             "qwen2.5-coder:14b-devops" => vec!["qwen2.5-coder-14b-devops.modelfile".into()],
             "qwen2.5-coder:14b-quick" => vec!["qwen2.5-coder-14b-quick.modelfile".into()],
             "qwen2.5-coder:7b-quick" => vec!["qwen2.5-coder-7b-quick.modelfile".into()],
-            "gemma4:e4b" => vec!["gemma4-e4b.modelfile".into()],
-            "qwen2.5-coder:3b" | "qwen2.5-coder:3b-quick" => {
-                vec!["qwen2.5-coder-3b-quick.modelfile".into()]
-            }
-            "llama3.1:8b" => vec!["llama3.1-8b-devops.modelfile".into()],
             "nomic-embed-text:latest" | "nomic-embed-text" => vec![],
             _ => {
                 let base = model.replace([':', '.'], "-");
@@ -1135,8 +1345,6 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
             "qwen3-coder:30b-gpu" => vec!["qwen3-coder-30b-gpu.modelfile".into()],
             "gemma4:26b-devops" => vec!["gemma4-26b-devops.modelfile".into()],
             "devstral-small-2-gpu" => vec!["devstral-small-2-gpu.modelfile".into()],
-            "Qwen2.5-7B-instruct-GPU" => vec!["Qwen2.5-7B-instruct-GPU.modelfile".into()],
-            "snowflake-arctic-embed" => vec!["snowflake-arctic-embed.modfile".into()],
             "nomic-embed-text:latest" | "nomic-embed-text" => vec![],
             _ => {
                 let base = model.replace([':', '.'], "-");
@@ -1250,12 +1458,27 @@ async fn kilo(args: KiloArgs, verbose: bool) -> anyhow::Result<()> {
 
     match args.action {
         KiloAction::Init => {
-            let changed = crate::kilo_integration::patch_kilo_indexing(&config)?;
-            if changed {
-                println!("✅ Kilo config cleaned up: removed unsupported indexing block");
+            let base_url = config.ollama_base_url.clone();
+            let available = tokio::task::spawn_blocking(move || {
+                crate::kilo_integration::fetch_available_models(&base_url)
+            })
+            .await
+            .unwrap_or_default();
+            let available_ref = if available.is_empty() {
+                None
             } else {
-                println!("✅ Kilo config has no unsupported indexing block");
+                Some(available.as_slice())
+            };
+            let changed = crate::kilo_integration::patch_kilo_indexing(&config, available_ref)?;
+            if changed {
+                println!(
+                    "✅ Kilo config updated (provider models synced to available Ollama models)"
+                );
+            } else {
+                println!("✅ Kilo config up to date");
             }
+            let _ =
+                crate::kilo_integration::clean_project_kilo_config(&config.project_root, &config);
             emit_kiloignore(&config);
         }
         KiloAction::Status => {
@@ -1289,4 +1512,48 @@ async fn kilo(args: KiloArgs, verbose: bool) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic]
+    fn guard_refuses_etc_sudoers() {
+        forbid_sudoers_write(Path::new("/etc/sudoers"));
+    }
+
+    #[test]
+    #[should_panic]
+    fn guard_refuses_other_sudoers_dropin() {
+        forbid_sudoers_write(Path::new("/etc/sudoers.d/something-else"));
+    }
+
+    #[test]
+    fn guard_allows_kcharm_managed_sudoers_file() {
+        // Must NOT panic: this is the single sanctioned file.
+        forbid_sudoers_write(Path::new(KCHARM_SUDOERS_PATH));
+    }
+
+    #[test]
+    fn guard_allows_non_sudoers_paths() {
+        forbid_sudoers_write(Path::new("/etc/default/ollama"));
+        forbid_sudoers_write(Path::new("/etc/systemd/system/ollama.service"));
+    }
+
+    #[test]
+    fn generated_sudoers_content_has_no_sudoers_self_write_rule() {
+        // Regression test: the drop-in must never grant passwordless write
+        // access to the sudoers file itself (that enabled the prior lockout).
+        let sudoers = format!(
+            "{} ALL=(ALL) NOPASSWD: {} start ollama\n\
+             {} ALL=(ALL) NOPASSWD: /usr/bin/tee /etc/default/ollama\n",
+            "testuser", "/usr/bin/systemctl", "testuser"
+        );
+        assert!(
+            !sudoers.contains("/etc/sudoers"),
+            "sudoers drop-in must not reference /etc/sudoers"
+        );
+    }
 }

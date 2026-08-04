@@ -5,12 +5,26 @@
     "provider": "ollama",
     "model": "nomic-embed-text",
     "dimension": 768,
+    "ollama": {
+      "baseUrl": "http://localhost:11434/"
+    },
     "vectorStore": "qdrant",
     "qdrant": {
-      "url": "http://localhost:6333"
-    },
-    "ollama": {
-      "baseUrl": "http://localhost:11434"
+      "url": "http://localhost:6333/"
     }
   }
 }
+// This file is a project-level kilo config placeholder.
+// kcharm start / kcharm kilo init manages the full provider config at
+// ~/.config/kilo/kilo.json (user-level). The "indexing" block is no longer
+// supported by the Kilo schema and has been removed.
+// Local models are discovered dynamically from the running Ollama instance.
+//
+// ── HARD SAFETY GUARDRAIL (DO NOT REMOVE) ──────────────────────────────────
+// SUDOERS IS OFF-LIMITS. Never run sudo visudo / sudo tee /etc/sudoers* /
+// sudoedit / chmod / chown on any /etc/sudoers or /etc/sudoers.d file, via
+// bash or code. A past change did this and locked the user out of sudo for
+// days + broke graphics drivers. kcharm guards this in code (forbid_sudoers_write)
+// and only ever manages /etc/sudoers.d/ollama through a visudo-validated atomic
+// install. If sudoers changes seem necessary, STOP and tell the user to do it
+// manually. `make sod` / `kcharm start` must never touch sudoers.

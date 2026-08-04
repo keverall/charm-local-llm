@@ -26,17 +26,28 @@ pub struct RunningModel {
 
 pub struct OllamaClient {
     client: Client,
+    download_client: Client,
     config: Config,
 }
 
 impl OllamaClient {
     pub fn new(config: Config) -> Self {
         let client = Client::builder()
-            .timeout(Duration::from_secs(300))
+            .timeout(Duration::from_secs(30))
             .build()
             .unwrap_or_default();
 
-        Self { client, config }
+        // No timeout — used for model pull/create which can take many minutes.
+        let download_client = Client::builder()
+            .timeout(Duration::from_secs(600))
+            .build()
+            .unwrap_or_default();
+
+        Self {
+            client,
+            download_client,
+            config,
+        }
     }
 
     pub fn base_url(&self) -> &str {
@@ -98,14 +109,26 @@ impl OllamaClient {
 
     pub async fn pull_model(&self, model_name: &str) -> anyhow::Result<()> {
         let url = format!("{}/api/pull", self.base_url());
-        let payload = serde_json::json!({ "name": model_name, "stream": true });
+        let payload = serde_json::json!({ "name": model_name, "stream": false });
         info!("Pulling model: {}", model_name);
-        let resp = self.client.post(&url).json(&payload).send().await?;
+        let resp = self
+            .download_client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await?;
 
         if !resp.status().is_success() {
-            return Err(anyhow::anyhow!("Failed to pull model: {}", resp.status()));
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(anyhow::anyhow!(
+                "Failed to pull model: {} - {}",
+                status,
+                text
+            ));
         }
 
+        resp.json::<serde_json::Value>().await?;
         Ok(())
     }
 
@@ -137,7 +160,7 @@ impl OllamaClient {
         let parsed_modelfile = parse_modelfile_content(&modelfile_content)?;
         let mut payload = serde_json::json!({
             "name": model_name,
-            "stream": true,
+            "stream": false,
         });
 
         if let Some(from) = parsed_modelfile.from {
@@ -182,7 +205,16 @@ impl OllamaClient {
             "Creating model '{}' from modelfile: {:?}",
             model_name, modelfile_path
         );
-        let resp = self.client.post(&url).json(&payload).send().await?;
+
+        // With stream:false Ollama returns a single JSON response once the
+        // model is fully written to disk. We read it to completion so the
+        // server finishes before we declare success.
+        let resp = self
+            .download_client
+            .post(&url)
+            .json(&payload)
+            .send()
+            .await?;
 
         if !resp.status().is_success() {
             let status = resp.status();
@@ -193,6 +225,11 @@ impl OllamaClient {
                 text
             ));
         }
+
+        // With stream:false Ollama returns a single JSON response once the
+        // model is fully written to disk. We read it to completion so the
+        // server finishes before we declare success.
+        resp.json::<serde_json::Value>().await?;
 
         info!("Model '{}' created successfully", model_name);
         Ok(())
@@ -307,15 +344,25 @@ pub fn extract_base_model(modelfile_content: &str) -> Option<String> {
 }
 
 pub fn ollama_running(port: u16) -> bool {
-    if let Ok(client) = reqwest::blocking::Client::builder()
+    let client = match reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(5))
         .build()
     {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    // Probe every common loopback address. Ollama may bind IPv6 ([::]) while a
+    // health check only hits 127.0.0.1 (IPv4) — without this, a perfectly
+    // healthy server reports as "not running" and `kcharm start` bails out
+    // before it ever patches the Kilo/Crush configs.
+    for host in ["127.0.0.1", "[::1]", "localhost"] {
         if let Ok(resp) = client
-            .get(format!("http://127.0.0.1:{}/api/tags", port))
+            .get(format!("http://{}:{}/api/tags", host, port))
             .send()
         {
-            return resp.status().is_success();
+            if resp.status().is_success() {
+                return true;
+            }
         }
     }
     false

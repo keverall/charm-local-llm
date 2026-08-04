@@ -7,10 +7,6 @@ FROM devstral-small-2:latest
 # Hardware:         NVIDIA GeForce RTX 4090 (24GB VRAM)
 #============================================================================
 
-PARAMETER num_batch 1024
-PARAMETER num_thread 24
-PARAMETER num_ctx 16384
-PARAMETER num_gpu -1
 
 SYSTEM """You are Devstral, a fast and value-priced model optimized for RTX 4090 GPU acceleration.
 You specialize in quick DevOps tasks and scripting. Provide accurate, extremely concise, and helpful responses."""

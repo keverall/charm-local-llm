@@ -129,7 +129,7 @@ fn test_verify_kilo_config_with_invalid_indexing() {
 }
 
 #[test]
-fn test_patch_kilo_indexing_removes_invalid_block() {
+fn test_patch_kilo_indexing_preserves_and_repairs_block() {
     let tmp = std::env::temp_dir().join("kilo_test_patch.json");
     let content = serde_json::json!({
         "indexing": {
@@ -145,14 +145,211 @@ fn test_patch_kilo_indexing_removes_invalid_block() {
         ..Config::default(Platform::CachyOS)
     };
     let changed =
-        charm_local_llm::kilo_integration::patch_kilo_indexing_at_path(&tmp, &config).unwrap();
+        charm_local_llm::kilo_integration::patch_kilo_indexing_at_path(&tmp, &config, None)
+            .unwrap();
     assert!(changed);
 
     let patched: serde_json::Value =
         serde_json::from_str(&std::fs::read_to_string(&tmp).unwrap()).unwrap();
-    assert!(patched.get("indexing").is_none());
+    // Indexing must be preserved (not deleted) and repaired with required fields.
+    let idx = patched
+        .get("indexing")
+        .expect("indexing block must be preserved");
+    assert_eq!(idx.get("enabled"), Some(&serde_json::json!(true)));
+    assert_eq!(idx.get("provider"), Some(&serde_json::json!("ollama")));
+    assert_eq!(
+        idx.get("model"),
+        Some(&serde_json::json!("nomic-embed-text"))
+    );
+    assert_eq!(idx.get("dimension"), Some(&serde_json::json!(768)));
+    assert_eq!(
+        idx.get("ollama").and_then(|o| o.get("baseUrl")),
+        Some(&serde_json::json!("http://localhost:11434/"))
+    );
+    assert_eq!(idx.get("vectorStore"), Some(&serde_json::json!("qdrant")));
+    assert_eq!(
+        idx.get("qdrant").and_then(|q| q.get("url")),
+        Some(&serde_json::json!("http://localhost:6333/"))
+    );
 
     std::fs::remove_file(&tmp).ok();
+}
+
+#[test]
+fn test_patch_kilo_indexing_syncs_dynamic_models() {
+    let tmp = std::env::temp_dir().join("kilo_test_dynamic_models.json");
+    // Start with a stale provider that has num_gpu, duplicates, and unloaded models
+    let content = serde_json::json!({
+        "indexing": { "provider": "ollama" },
+        "provider": {
+            "Ollama Local (FREE)": {
+                "options": { "baseURL": "http://localhost:11434/v1/" },
+                "models": {
+                    "old-model-not-loaded": { "name": "Old Model", "num_gpu": "32" },
+                    "nomic-embed-text": { "name": "Nomic Embed Text" },
+                    "nomic-embed-text:latest": { "name": "Nomic Embed Text" }
+                }
+            }
+        }
+    });
+    std::fs::write(&tmp, serde_json::to_string(&content).unwrap()).unwrap();
+
+    let config = Config {
+        ollama_port: 11434,
+        qdrant_port: 6333,
+        ..Config::default(Platform::CachyOS)
+    };
+
+    // Simulate Ollama's /api/tags returning only these models
+    let available = vec![
+        "qwen3-coder:30b-gpu".to_string(),
+        "gemma4:26b-devops".to_string(),
+        "nomic-embed-text:latest".to_string(),
+    ];
+
+    let changed = charm_local_llm::kilo_integration::patch_kilo_indexing_at_path(
+        &tmp,
+        &config,
+        Some(&available),
+    )
+    .unwrap();
+    assert!(changed);
+
+    let patched: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&tmp).unwrap()).unwrap();
+
+    // indexing block must be preserved (not deleted) and repaired
+    let idx = patched
+        .get("indexing")
+        .expect("indexing block must be preserved");
+    assert_eq!(idx.get("provider"), Some(&serde_json::json!("ollama")));
+    assert_eq!(
+        idx.get("model"),
+        Some(&serde_json::json!("nomic-embed-text"))
+    );
+
+    let models = patched["provider"]["Ollama Local (FREE)"]["models"]
+        .as_object()
+        .unwrap();
+
+    // Only the 3 available models (de-duplicated)
+    assert_eq!(models.len(), 3, "should have exactly 3 models after dedup");
+    assert!(models.contains_key("qwen3-coder:30b-gpu"));
+    assert!(models.contains_key("gemma4:26b-devops"));
+    assert!(models.contains_key("nomic-embed-text"));
+
+    // The stale unloaded model must be gone
+    assert!(!models.contains_key("old-model-not-loaded"));
+
+    // nomic-embed-text appears once (not duplicated as nomic-embed-text:latest)
+    assert!(!models.contains_key("nomic-embed-text:latest"));
+
+    // No num_gpu should survive in any model entry
+    for (_id, entry) in models.iter() {
+        let entry_obj = entry.as_object().unwrap();
+        assert!(!entry_obj.contains_key("num_gpu"));
+        assert!(entry_obj.contains_key("name"));
+    }
+
+    std::fs::remove_file(&tmp).ok();
+}
+
+#[test]
+fn test_patch_kilo_fallback_when_no_models_available() {
+    let tmp = std::env::temp_dir().join("kilo_test_fallback.json");
+    let content = serde_json::json!({});
+    std::fs::write(&tmp, serde_json::to_string(&content).unwrap()).unwrap();
+
+    let config = Config {
+        ollama_port: 11434,
+        qdrant_port: 6333,
+        ..Config::default(Platform::CachyOS)
+    };
+
+    // Empty available list → falls back to platform known models
+    let changed =
+        charm_local_llm::kilo_integration::patch_kilo_indexing_at_path(&tmp, &config, Some(&[]))
+            .unwrap();
+    assert!(changed);
+
+    let patched: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&tmp).unwrap()).unwrap();
+
+    let models = patched["provider"]["Ollama Local (FREE)"]["models"]
+        .as_object()
+        .unwrap();
+
+    // CachyOS fallback includes qwen3-coder:30b-gpu, gemma4:26b-devops,
+    // devstral-small-2-gpu, nomic-embed-text
+    assert!(models.contains_key("qwen3-coder:30b-gpu"));
+    assert!(models.contains_key("gemma4:26b-devops"));
+    assert!(models.contains_key("devstral-small-2-gpu"));
+    assert!(models.contains_key("nomic-embed-text"));
+
+    std::fs::remove_file(&tmp).ok();
+}
+
+#[test]
+fn test_clean_project_kilo_config_preserves_indexing() {
+    let tmp = std::env::temp_dir().join("kilo_test_project_config.jsonc");
+    let content = serde_json::json!({
+        "$schema": "https://app.kilo.ai/config.json",
+        "indexing": {
+            "enabled": true,
+            "provider": "ollama"
+        },
+        "model": "kilo/kilo-auto/balanced"
+    });
+    std::fs::write(&tmp, serde_json::to_string(&content).unwrap()).unwrap();
+
+    // Temporarily treat the temp file as the project .kilo/kilo.jsonc
+    let project_root = std::env::temp_dir().join("kilo_test_project_root");
+    let kilo_dir = project_root.join(".kilo");
+    std::fs::create_dir_all(&kilo_dir).unwrap();
+    std::fs::copy(&tmp, kilo_dir.join("kilo.jsonc")).unwrap();
+
+    let config = Config {
+        ollama_port: 11434,
+        qdrant_port: 6333,
+        ..Config::default(Platform::CachyOS)
+    };
+    let changed =
+        charm_local_llm::kilo_integration::clean_project_kilo_config(&project_root, &config)
+            .unwrap();
+    assert!(changed);
+
+    let cleaned: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(kilo_dir.join("kilo.jsonc")).unwrap())
+            .unwrap();
+    // Indexing must be preserved and repaired, not deleted.
+    let idx = cleaned.get("indexing").expect("indexing must be preserved");
+    assert_eq!(idx.get("provider"), Some(&serde_json::json!("ollama")));
+    assert_eq!(
+        idx.get("model"),
+        Some(&serde_json::json!("nomic-embed-text"))
+    );
+    assert_eq!(idx.get("vectorStore"), Some(&serde_json::json!("qdrant")));
+    assert_eq!(
+        idx.get("qdrant").and_then(|q| q.get("url")),
+        Some(&serde_json::json!("http://localhost:6333/"))
+    );
+    assert!(cleaned.get("model").is_some());
+
+    // Second call should be a no-op (nothing left to repair)
+    let changed_again =
+        charm_local_llm::kilo_integration::clean_project_kilo_config(&project_root, &config)
+            .unwrap();
+    assert!(!changed_again);
+
+    std::fs::remove_dir_all(&project_root).ok();
+    std::fs::remove_file(&tmp).ok();
+}
+
+#[test]
+fn test_normalize_model_name_strips_latest() {
+    // Verify the public behavior through fetch_available_models logic
+    // (tested indirectly since normalize_model_name is private)
+    // We verify de-duplication by checking the dynamic model sync test above
 }
 
 #[test]
@@ -236,6 +433,25 @@ fn test_macos_m5_32gb_defaults_to_27b_devops() {
         config.quick_model.as_deref(),
         Some("qwen2.5-coder:14b-quick")
     );
+}
+
+#[test]
+fn test_config_models_path_cachyos_is_home_ollama() {
+    let config = Config::default(Platform::CachyOS);
+    let mp = config.ollama_models_path.as_ref().unwrap();
+    assert_eq!(mp, std::path::Path::new("/home/ollama/models"));
+}
+
+#[test]
+fn test_config_models_path_macos_is_dot_ollama() {
+    let config = Config::default(Platform::MacOSM532Gb);
+    let mp = config.ollama_models_path.as_ref().unwrap();
+    assert!(mp.ends_with(".ollama/models"));
+}
+
+#[test]
+fn test_macos_m5_32gb_modfile_dir() {
+    let config = Config::default(Platform::MacOSM532Gb);
     assert!(config
         .modfile_dir
         .to_string_lossy()

@@ -4,11 +4,6 @@ FROM qwen2.5-coder:14b
 # Unified memory architecture - model + KV cache share 24GB RAM
 # M5 has ~40% higher memory bandwidth than M4, allows larger context
 # Target: ~9GB model + ~5GB KV cache at 24k context
-PARAMETER num_batch 256
-PARAMETER num_thread 10
-PARAMETER num_ctx 24576
-PARAMETER num_gpu -1
-PARAMETER num_predict 4096       # Generates deep multiline logic sequences without clipping
 PARAMETER temperature 0.0        # Strict zero-variance mode; completely forces predictability
 PARAMETER top_p 0.9              # High token quality bounds
 PARAMETER stop "<|im_start|>"
