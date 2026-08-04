@@ -126,7 +126,7 @@ fn write_privileged_file(path: &Path, content: &str, mode: u32) -> bool {
     let handle = std::thread::spawn(move || {
         use std::io::Write;
         let mut child = match ProcessCommand::new("sudo")
-            .args(["tee", &p])
+            .args(["-n", "tee", &p])
             .stdin(Stdio::piped())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
@@ -141,7 +141,7 @@ fn write_privileged_file(path: &Path, content: &str, mode: u32) -> bool {
         let ok = child.wait().map(|s| s.success()).unwrap_or(false);
         if ok {
             let _ = ProcessCommand::new("sudo")
-                .args(["chmod", &chmod_mode, &p])
+                .args(["-n", "chmod", &chmod_mode, &p])
                 .status();
         }
         ok
@@ -191,7 +191,7 @@ fn ensure_ollama_models_dir(config: Config) {
     // mkdir -p, then chown to the service user (group = same).
     let ok = std::thread::spawn(move || {
         let mk = ProcessCommand::new("sudo")
-            .args(["mkdir", "-p", &models_str])
+            .args(["-n", "mkdir", "-p", &models_str])
             .status()
             .ok()
             .map(|s| s.success())
@@ -201,6 +201,7 @@ fn ensure_ollama_models_dir(config: Config) {
         }
         ProcessCommand::new("sudo")
             .args([
+                "-n",
                 "chown",
                 "-R",
                 &format!("{}:{}", service_user, service_user),

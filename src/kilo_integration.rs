@@ -10,7 +10,7 @@ pub fn kilo_config_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".config")
         .join("kilo")
-        .join("kilo.json")
+        .join("kilo.jsonc")
 }
 
 pub fn verify_kilo_config(config: &Config) -> anyhow::Result<KiloConfigStatus> {
@@ -262,7 +262,8 @@ pub fn patch_kilo_indexing_at_path(
     }
 
     let content = std::fs::read_to_string(path)?;
-    let mut json: Value = serde_json::from_str(&content)?;
+    let stripped = strip_jsonc_comments(&content);
+    let mut json: Value = serde_json::from_str(&stripped)?;
 
     let obj = json
         .as_object_mut()
