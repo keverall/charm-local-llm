@@ -12,6 +12,9 @@
 Description=Ollama Language Model Service
 After=network-online.target
 Wants=network-online.target
+# Rate limiting belongs in [Unit] on modern systemd
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -29,12 +32,10 @@ Environment=OLLAMA_PORT=11434
 Environment=OLLAMA_NUM_PARALLEL=4
 Environment=OLLAMA_MAX_LOADED_MODELS=1
 
-# Conditional restart policy (not always-on; controlled by kcharm)
-# Restart on failure OR when manually restarted via systemctl
-Restart=ondemand
+# Restart policy: `ondemand` is NOT a valid systemd value (it was silently
+# ignored, leaving the service with no restart policy at all).
+Restart=on-failure
 RestartSec=5
-StartLimitIntervalSec=60
-StartLimitBurst=3
 
 # Executable and arguments
 ExecStart=/usr/local/bin/ollama serve

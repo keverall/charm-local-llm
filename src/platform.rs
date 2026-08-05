@@ -98,6 +98,18 @@ pub fn find_docker_compose() -> Option<PathBuf> {
         .or_else(|| which::which("docker").ok())
 }
 
+/// Resolve the compose CLI as a program plus leading arguments. Handles both
+/// the standalone `docker-compose` binary and the `docker compose` plugin
+/// (where `compose` must be passed as the first argument).
+pub fn compose_command() -> Option<(PathBuf, Vec<String>)> {
+    if let Ok(bin) = which::which("docker-compose") {
+        return Some((bin, Vec::new()));
+    }
+    which::which("docker")
+        .ok()
+        .map(|bin| (bin, vec!["compose".to_string()]))
+}
+
 pub fn check_nvidia_smi() -> Option<String> {
     let output = Command::new("nvidia-smi")
         .args([
@@ -145,23 +157,119 @@ pub fn detect_platform_env_path(project_root: &Path, platform: Platform) -> Path
         .join(".env")
 }
 
+/// Path of the file that records the kcharm project root, written during
+/// `kcharm service install`. This is what makes non-interactive boot/login
+/// starts (systemd user unit, XDG autostart) resolve the repo correctly even
+/// though their working directory is `$HOME`.
+pub fn project_root_marker_path() -> PathBuf {
+    dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".config")
+        .join("kcharm")
+        .join("project-root")
+}
+
+/// True when `dir` looks like the charm-local-llm checkout.
+fn is_project_root(dir: &Path) -> bool {
+    dir.join("Cargo.toml").exists() || dir.join("docker-compose.yml").exists()
+}
+
+/// Persist the resolved project root so boot-time runs can find it.
+pub fn save_project_root(root: &Path) -> std::io::Result<()> {
+    let marker = project_root_marker_path();
+    if let Some(parent) = marker.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(marker, format!("{}\n", root.display()))
+}
+
+fn marker_project_root() -> Option<PathBuf> {
+    let content = std::fs::read_to_string(project_root_marker_path()).ok()?;
+    let path = PathBuf::from(content.trim());
+    if is_project_root(&path) {
+        Some(path)
+    } else {
+        None
+    }
+}
+
 pub fn resolve_project_root(override_path: Option<PathBuf>) -> PathBuf {
     if let Some(p) = override_path {
         let canonical = std::fs::canonicalize(p).unwrap_or_else(|_| PathBuf::from("."));
         return canonical;
     }
 
-    if let Ok(current) = std::env::current_dir() {
-        if current.join("Cargo.toml").exists() {
-            return current;
+    // Explicit environment override (used by the systemd user unit).
+    if let Ok(env_root) = std::env::var("KCHARM_PROJECT_ROOT") {
+        let path = PathBuf::from(env_root);
+        if is_project_root(&path) {
+            return path;
         }
     }
 
+    // Walk up from the current directory looking for the checkout.
     if let Ok(current) = std::env::current_dir() {
-        if current.file_name().map(|n| n == "scripts").unwrap_or(false) {
-            return current.parent().unwrap_or(&current).to_path_buf();
+        for dir in current.ancestors() {
+            if is_project_root(dir) {
+                return dir.to_path_buf();
+            }
         }
+    }
+
+    // Recorded at bootstrap time — the path used by login/boot starts.
+    if let Some(root) = marker_project_root() {
+        return root;
     }
 
     std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
+/// Ensure the Docker daemon is running, starting it via systemd if needed.
+/// Returns true when Docker responds to `docker info`.
+pub fn ensure_docker_running() -> bool {
+    let docker_ok = || {
+        Command::new("docker")
+            .arg("info")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    };
+
+    if docker_ok() {
+        return true;
+    }
+
+    if std::env::consts::OS != "linux" {
+        return false;
+    }
+
+    // Try to start the daemon (passwordless sudo, or root).
+    let started = if unsafe { libc::geteuid() } == 0 {
+        Command::new("systemctl")
+            .args(["start", "docker"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    } else {
+        Command::new("sudo")
+            .args(["-n", "systemctl", "start", "docker"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false)
+    };
+
+    if !started {
+        return false;
+    }
+
+    // Wait for the daemon socket to accept commands.
+    for _ in 0..30 {
+        if docker_ok() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+    false
 }

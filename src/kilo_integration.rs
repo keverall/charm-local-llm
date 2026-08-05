@@ -3,7 +3,54 @@ use crate::Platform;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tracing::{info, warn};
+
+/// Bundled Kilo configuration JSON Schema (draft 2020-12). This is the upstream
+/// `https://app.kilo.ai/config.json` with the `models.dev` model registry
+/// inlined and three documented relaxations so it matches what the running
+/// Kilo actually accepts (the published schema is stricter than Kilo's runtime
+/// and would otherwise reject valid local-Ollama configs):
+///   1. `model` / `small_model` / `agent.*.model` accept any string (not just
+///      the fixed `models.dev` registry), so local Ollama model names work.
+///   2. `indexing` and `subagent_model` top-level keys are permitted (Kilo uses
+///      them but the published root schema omits them).
+///   3. Provider `models` entries are free-form objects (e.g. OpenRouter's
+///      `id`/`options`), while the generator still strips invalid numeric
+///      options like `num_gpu` via `sanitize_model_options`.
+const KILO_CONFIG_SCHEMA: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/assets/kilo/config-schema.json"
+));
+
+/// Parse and compile the bundled schema once and reuse it. Returns `None`
+/// only if the bundled schema itself is corrupt (it should never be).
+fn kilo_schema() -> Option<&'static jsonschema::JSONSchema> {
+    static SCHEMA: OnceLock<jsonschema::JSONSchema> = OnceLock::new();
+    Some(SCHEMA.get_or_init(|| {
+        let raw: Value = serde_json::from_str(KILO_CONFIG_SCHEMA)
+            .expect("bundled Kilo config schema must parse as JSON");
+        jsonschema::JSONSchema::compile(&raw).expect("bundled Kilo config schema must compile")
+    }))
+}
+
+/// Validate a constructed Kilo config against the bundled schema.
+///
+/// Returns the list of human-readable schema violations (empty when valid).
+/// kcharm must call this *before* writing `kilo.jsonc` and must NOT write when
+/// the result is non-empty — otherwise a malformed config would break Kilo.
+pub fn validate_kilo_config(value: &Value) -> Vec<String> {
+    let Some(schema) = kilo_schema() else {
+        // Schema unavailable: be permissive rather than block the whole start.
+        return vec![];
+    };
+    match schema.validate(value) {
+        Ok(()) => vec![],
+        Err(errors) => errors
+            .map(|e| format!("{}: {}", e.instance_path, e))
+            .collect(),
+    }
+}
 
 pub fn kilo_config_path() -> PathBuf {
     dirs::home_dir()
@@ -281,6 +328,22 @@ pub fn patch_kilo_indexing_at_path(
     }
 
     if changed {
+        // Never write a config that violates the Kilo schema — a malformed
+        // kilo.jsonc breaks Kilo entirely. Validate first and abort the write
+        // (keeping the previous, working file) if the constructed JSON is bad.
+        let violations = validate_kilo_config(&json);
+        if !violations.is_empty() {
+            for v in &violations {
+                warn!("kilo.json schema violation (NOT written): {}", v);
+            }
+            anyhow::bail!(
+                "Refusing to write kilo.jsonc: {} schema violation(s). \
+                 Keeping the previous config to avoid breaking Kilo. \
+                 First violation: {}",
+                violations.len(),
+                violations[0]
+            );
+        }
         let new_content = serde_json::to_string_pretty(&json)?;
         std::fs::write(path, new_content)?;
         info!("kilo.json updated at {}", path.display());
@@ -754,4 +817,74 @@ pub fn ensure_kiloignore(config: &Config) -> anyhow::Result<bool> {
     std::fs::write(&dest, content)?;
     info!(".kiloignore written to {}", dest.display());
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn valid_kilo_config_passes_schema() {
+        // Mirrors the user-provided working config (valid naming).
+        let cfg = json!({
+            "agent": {
+                "ask": {"model": "openrouter/hy3"},
+                "code": {"model": "openrouter/hy3"},
+                "debug": {"model": "openrouter/hy3"},
+                "orchestrator": {"model": "openrouter/hy3"},
+                "plan": {"model": "openrouter/hy3"}
+            },
+            "indexing": {
+                "dimension": 768,
+                "enabled": true,
+                "model": "ollama/nomic-embed-text:latest",
+                "ollama": {"baseUrl": "http://localhost:11434/"},
+                "provider": "ollama",
+                "qdrant": {"url": "http://localhost:6333/"},
+                "vectorStore": "qdrant"
+            },
+            "instructions": ["be safe"],
+            "model": "openrouter/hy3",
+            "small_model": "openrouter/hy3-low",
+            "subagent_model": "openrouter/hy3-low",
+            "permission": {"bash": "allow", "edit": {"*": "allow"}, "read": {"*": "allow"}},
+            "provider": {
+                "Ollama Local (FREE)": {
+                    "models": {
+                        "gemma4-26b-devops": {"name": "gemma4-26b-devops"},
+                        "qwen3-coder:30b-gpu": {"name": "Qwen 3 Coder 30B GPU"}
+                    },
+                    "options": {"baseURL": "http://localhost:11434/v1/"}
+                }
+            }
+        });
+        assert!(
+            validate_kilo_config(&cfg).is_empty(),
+            "valid config unexpectedly failed schema: {:?}",
+            validate_kilo_config(&cfg)
+        );
+    }
+
+    #[test]
+    fn invalid_kilo_config_is_rejected() {
+        let mut cfg = json!({
+            "model": "openrouter/hy3",
+            "agent": {"code": {"model": "openrouter/hy3"}}
+        });
+        // Wrong type for a required-shape field.
+        cfg["model"] = json!(123);
+        // Unknown model entry option that breaks the OpenAI-compatible API.
+        cfg["provider"] = json!({
+            "Ollama Local (FREE)": {
+                "models": {"gemma4-26b-devops": {"name": "x", "num_gpu": 50}},
+                "options": {"baseURL": "http://localhost:11434/v1/"}
+            }
+        });
+        let violations = validate_kilo_config(&cfg);
+        assert!(
+            !violations.is_empty(),
+            "invalid config should have produced schema violations"
+        );
+    }
 }

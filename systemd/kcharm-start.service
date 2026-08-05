@@ -1,0 +1,32 @@
+#============================================================================
+# Title:            kcharm-start.service (systemd USER unit)
+# Description:      Runs the `make sod` equivalent (`kcharm start`) at login/boot:
+#                   Ollama + models + Qdrant + Crush/Kilo/AGENTS config refresh.
+# Install:          kcharm service install
+#                   (copies to ~/.config/systemd/user/, enables it, and records
+#                    the project root in ~/.config/kcharm/project-root)
+# Notes:            @PROJECT_ROOT@ and @KCHARM_BIN@ are substituted at install
+#                   time by kcharm. Docker must be up before Qdrant starts, so
+#                   the unit waits for the system docker.service.
+#============================================================================
+
+[Unit]
+Description=kcharm Start (local Ollama DevOps environment)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=@PROJECT_ROOT@
+Environment=KCHARM_PROJECT_ROOT=@PROJECT_ROOT@
+# Wait for the Docker daemon (and the Ollama system service) before starting,
+# otherwise Qdrant's `docker compose up` races the daemon at boot.
+ExecStartPre=/usr/bin/env sh -c 'for i in $(seq 1 60); do docker info >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'
+ExecStart=@KCHARM_BIN@ start
+TimeoutStartSec=900
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

@@ -174,7 +174,13 @@ impl Config {
             ollama_bin: "ollama".into(),
             ollama_base_url: "http://localhost:11434".into(),
             ollama_num_parallel: if platform.is_macos() { 4 } else { 24 },
-            ollama_max_loaded_models: if platform.is_macos() { 1 } else { 2 },
+            // A single 24GB RTX 4090 cannot keep two large devops models
+            // resident at once (gemma4-26b-devops ~17GB + qwen3-coder:30b-gpu
+            // ~21GB > 24GB), so Ollama must evict the other model before
+            // loading the requested one. MAX_LOADED=1 makes every local model
+            // loadable (with a one-time swap delay) instead of failing with
+            // "model failed to load" under VRAM pressure.
+            ollama_max_loaded_models: 1,
             ollama_kv_cache_type,
             ollama_flash_attention,
             ollama_gpu_layers,
@@ -299,7 +305,7 @@ impl Config {
     pub fn validate_cachyos_single_gpu_profile(&self) -> anyhow::Result<()> {
         const EXPECTED_GPU_LAYERS: u16 = 50;
         const EXPECTED_NUM_PARALLEL: u16 = 24;
-        const EXPECTED_MAX_LOADED: u16 = 2;
+        const EXPECTED_MAX_LOADED: u16 = 1;
 
         if self.ollama_num_parallel == 0 {
             anyhow::bail!(

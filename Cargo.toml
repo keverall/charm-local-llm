@@ -27,6 +27,7 @@ chrono = "0.4"
 anyhow = "1.0.103"
 thiserror = "2.0.18"
 libc = "0.2.186"
+jsonschema = { version = "0.18", features = ["draft202012"] }
 
 [dev-dependencies]
 assert_cmd = "2.0"

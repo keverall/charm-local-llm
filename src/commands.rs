@@ -5,8 +5,9 @@ use crate::cli::{
 };
 use crate::ollama::{ollama_running, start_ollama_direct, OllamaClient};
 use crate::platform::{
-    check_nvidia_smi, detect_platform, detect_platform_env_path, find_docker_compose,
-    find_ollama_bin, load_env_file, resolve_project_root,
+    check_nvidia_smi, compose_command, detect_platform, detect_platform_env_path,
+    ensure_docker_running, find_docker_compose, find_ollama_bin, load_env_file,
+    resolve_project_root, save_project_root,
 };
 use crate::{Config, Platform};
 use std::path::{Path, PathBuf};
@@ -415,38 +416,105 @@ fn write_privileged_sudoers(dest: &Path, src: &Path) -> bool {
         .unwrap_or(false)
 }
 
-/// Create an XDG autostart entry (`~/.config/autostart/kcharm-start.desktop`)
-/// that runs `kcharm start` on login (KDE/GNOME/most Linux desktops).
-fn setup_autostart(_config: &Config) -> anyhow::Result<()> {
+/// Resolve the kcharm binary used by boot-time units.
+fn kcharm_bin_path() -> PathBuf {
     let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let autostart_dir = home.join(".config").join("autostart");
-    std::fs::create_dir_all(&autostart_dir).ok();
-    let desktop = autostart_dir.join("kcharm-start.desktop");
-
-    let bin = if home.join(".local/bin/kcharm").exists() {
+    if home.join(".local/bin/kcharm").exists() {
         home.join(".local/bin/kcharm")
     } else {
         std::env::current_exe().unwrap_or_else(|_| PathBuf::from("kcharm"))
-    };
+    }
+}
+
+/// Install and enable the `kcharm-start` **systemd user unit**, which runs the
+/// `make sod` equivalent (`kcharm start`) at login/boot with the correct
+/// working directory and after the Docker daemon is available.
+///
+/// This replaces the old XDG autostart entry, which ran with `$HOME` as the
+/// working directory and therefore resolved the project root to `$HOME` —
+/// causing "docker-compose.yml: no such file or directory" and a silently
+/// missing Qdrant container.
+fn setup_boot_start(config: &Config) -> anyhow::Result<()> {
+    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+
+    // Record the project root so any non-interactive start can find the repo.
+    if let Err(e) = save_project_root(&config.project_root) {
+        warn!("Could not record project root: {}", e);
+    }
+
+    let bin = kcharm_bin_path();
     let Some(bin_str) = bin.to_str() else {
-        warn!("Could not determine kcharm binary path; skipping autostart");
+        warn!("Could not determine kcharm binary path; skipping boot start install");
+        return Ok(());
+    };
+    let Some(root_str) = config.project_root.to_str() else {
+        warn!("Could not determine project root; skipping boot start install");
         return Ok(());
     };
 
-    let content = format!(
-        "[Desktop Entry]\n\
-         Type=Application\n\
-         Name=kcharm Start (Ollama DevOps)\n\
-         Comment=Start local Ollama DevOps environment (kcharm start) on login\n\
-         Exec={} start\n\
-         Terminal=false\n\
-         Hidden=false\n\
-         X-GNOME-Autostart-enabled=true\n",
-        bin_str
-    );
-    std::fs::write(&desktop, content)?;
-    info!("Autostart entry created: {}", desktop.display());
+    let template = config
+        .project_root
+        .join("systemd")
+        .join("kcharm-start.service");
+    if !template.exists() {
+        warn!(
+            "kcharm-start.service template not found at {}; skipping boot start install",
+            template.display()
+        );
+        return Ok(());
+    }
+
+    let content = std::fs::read_to_string(&template)?
+        .replace("@PROJECT_ROOT@", root_str)
+        .replace("@KCHARM_BIN@", bin_str);
+
+    let unit_dir = home.join(".config").join("systemd").join("user");
+    std::fs::create_dir_all(&unit_dir)?;
+    let unit = unit_dir.join("kcharm-start.service");
+    std::fs::write(&unit, content)?;
+
+    let _ = ProcessCommand::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status();
+    let enabled = ProcessCommand::new("systemctl")
+        .args(["--user", "enable", "kcharm-start.service"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if enabled {
+        info!("Boot start unit installed and enabled: {}", unit.display());
+        println!("   ✅ systemd user unit enabled: kcharm-start.service");
+    } else {
+        warn!(
+            "Installed {} but could not enable it (systemctl --user unavailable?)",
+            unit.display()
+        );
+    }
+
+    // Ensure the unit runs even when no graphical session is open.
+    let _ = ProcessCommand::new("loginctl")
+        .args(["enable-linger", &whoami_user()])
+        .status();
+
+    // Remove the legacy XDG autostart entry so kcharm start does not run twice
+    // (and never again from the wrong working directory).
+    let legacy = home
+        .join(".config")
+        .join("autostart")
+        .join("kcharm-start.desktop");
+    if legacy.exists() {
+        if let Err(e) = std::fs::remove_file(&legacy) {
+            warn!("Could not remove legacy autostart entry: {}", e);
+        } else {
+            info!("Removed legacy autostart entry: {}", legacy.display());
+        }
+    }
+
     Ok(())
+}
+
+fn whoami_user() -> String {
+    std::env::var("USER").unwrap_or_else(|_| "root".to_string())
 }
 
 /// Run the full one-time OS bootstrap: systemd unit, passwordless sudo, and
@@ -463,7 +531,7 @@ fn bootstrap_os(config: &Config) -> anyhow::Result<()> {
     if !install_systemd_env(config) {
         warn!("Systemd env file installation failed; Ollama may use default values");
     }
-    setup_autostart(config)?;
+    setup_boot_start(config)?;
     println!("✅ OS bootstrap complete — the Ollama repo can now be deleted.");
     Ok(())
 }
@@ -493,6 +561,11 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
     config = config.with_env_overrides(env_vars);
 
     println!("🚀 Starting Ollama DevOps Environment...");
+    // Keep the recorded project root fresh whenever we start from a real
+    // checkout, so login/boot runs resolve the same repo.
+    if config.project_root.join("docker-compose.yml").exists() {
+        let _ = save_project_root(&config.project_root);
+    }
     println!("   Platform: {}", config.platform);
     println!("   Project root: {:?}", config.project_root);
     println!(
@@ -719,7 +792,10 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
 
     if find_docker_compose().is_some() {
         println!("🐳 Starting Qdrant...");
-        let _ = start_qdrant(&config).await;
+        if let Err(e) = start_qdrant(&config).await {
+            warn!("   Failed to start Qdrant: {}", e);
+            println!("   ⚠️  Qdrant not started: {}", e);
+        }
     }
 
     println!("🔧 Configuring coding assistants...");
@@ -779,10 +855,11 @@ async fn stop(args: StopArgs, verbose: bool) -> anyhow::Result<()> {
         return Ok(());
     }
 
-    if let Some(docker) = find_docker_compose() {
+    if let Some((docker, prefix)) = compose_command() {
         let compose = config.project_root.join("docker-compose.yml");
         if compose.exists() {
             let _ = ProcessCommand::new(&docker)
+                .args(&prefix)
                 .args(["-f", compose.to_str().unwrap(), "down", "--remove-orphans"])
                 .status();
             let _ = ProcessCommand::new("docker")
@@ -906,6 +983,54 @@ async fn models(args: ModelsArgs, verbose: bool) -> anyhow::Result<()> {
             client.remove_model(&model).await?;
             println!("✅ Model '{}' removed", model);
         }
+        ModelsAction::CheckUpdates => {
+            let vram = crate::model_watch::platform_vram_gb(config.platform);
+            // Library scraping uses blocking reqwest; keep it off the async runtime.
+            let checks = tokio::task::spawn_blocking(move || {
+                crate::model_watch::check_updates(&config.ollama_base_url, config.platform, vram)
+            })
+            .await??;
+
+            println!("🔍 Ollama model update check (VRAM budget: {} GB)\n", vram);
+            for c in &checks {
+                println!("• {}", c.family);
+                if let Some(m) = &c.current_model {
+                    println!("    current : {}", m);
+                }
+                match &c.latest {
+                    Some(l) => println!(
+                        "    latest  : {}:{} (~{:.0} GB){}",
+                        c.family,
+                        l,
+                        c.latest_est_gb,
+                        if c.fits { "" } else { "  ⚠ exceeds VRAM" }
+                    ),
+                    None => println!("    latest  : (unknown)"),
+                }
+                if !c.available.is_empty() {
+                    println!("    tags    : {}", c.available.join(", "));
+                }
+                println!("    → {}", c.recommendation);
+            }
+
+            let upgrades: Vec<&crate::model_watch::FamilyCheck> = checks
+                .iter()
+                .filter(|c| c.recommendation.contains("upgrade available"))
+                .collect();
+            if upgrades.is_empty() {
+                println!(
+                    "\n✅ No upgrades required — your pulled models are current for your hardware."
+                );
+            } else {
+                println!(
+                    "\n💡 {} model famil(ies) have a newer release that fits your hardware:",
+                    upgrades.len()
+                );
+                for c in upgrades {
+                    println!("   - {}:{}", c.family, c.latest.as_deref().unwrap_or("?"));
+                }
+            }
+        }
     }
 
     Ok(())
@@ -999,8 +1124,8 @@ async fn qdrant(args: QdrantArgs, verbose: bool) -> anyhow::Result<()> {
     let env_vars = load_env_file(&env_path);
     let config = Config::new(platform, &project_root).with_env_overrides(env_vars);
 
-    let docker =
-        find_docker_compose().ok_or_else(|| anyhow::anyhow!("docker-compose not found"))?;
+    let (docker, prefix) =
+        compose_command().ok_or_else(|| anyhow::anyhow!("docker compose not found"))?;
     let compose = config.project_root.join("docker-compose.yml");
 
     if args.dry_run {
@@ -1029,6 +1154,7 @@ async fn qdrant(args: QdrantArgs, verbose: bool) -> anyhow::Result<()> {
                 .output();
 
             let status = ProcessCommand::new(&docker)
+                .args(&prefix)
                 .args(["-f", compose.to_str().unwrap(), "up", "-d"])
                 .env("QDRANT_PORT", config.qdrant_port.to_string())
                 .env(
@@ -1055,6 +1181,7 @@ async fn qdrant(args: QdrantArgs, verbose: bool) -> anyhow::Result<()> {
         }
         QdrantAction::Stop => {
             let status = ProcessCommand::new(&docker)
+                .args(&prefix)
                 .args(["-f", compose.to_str().unwrap(), "down", "--remove-orphans"])
                 .status()?;
             if status.success() {
@@ -1065,6 +1192,7 @@ async fn qdrant(args: QdrantArgs, verbose: bool) -> anyhow::Result<()> {
         }
         QdrantAction::Status => {
             let output = ProcessCommand::new(&docker)
+                .args(&prefix)
                 .args(["-f", compose.to_str().unwrap(), "ps"])
                 .output()?;
             println!("{}", String::from_utf8_lossy(&output.stdout));
@@ -1254,15 +1382,34 @@ async fn start_qdrant(config: &Config) -> anyhow::Result<()> {
     let data_dir = &config.qdrant_data_dir;
     fs::create_dir_all(data_dir).ok();
 
-    let docker =
-        find_docker_compose().ok_or_else(|| anyhow::anyhow!("docker-compose not found"))?;
+    let (docker, prefix) =
+        compose_command().ok_or_else(|| anyhow::anyhow!("docker compose not found"))?;
     let compose = config.project_root.join("docker-compose.yml");
+    if !compose.exists() {
+        anyhow::bail!(
+            "docker-compose.yml not found at {} (project root resolved to {}). \
+             Run 'kcharm service install' from the repo to record the project root.",
+            compose.display(),
+            config.project_root.display()
+        );
+    }
+
+    // Boot/login starts can race the Docker daemon — make sure it is up first.
+    if !tokio::task::spawn_blocking(ensure_docker_running)
+        .await
+        .unwrap_or(false)
+    {
+        anyhow::bail!(
+            "Docker daemon is not running and could not be started (sudo systemctl start docker)"
+        );
+    }
 
     let _ = ProcessCommand::new("docker")
         .args(["rm", "-f", "qdrant"])
         .output();
 
     let status = ProcessCommand::new(&docker)
+        .args(&prefix)
         .args(["-f", compose.to_str().unwrap(), "up", "-d"])
         .env("QDRANT_PORT", config.qdrant_port.to_string())
         .env(
@@ -1329,6 +1476,7 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
             "qwen2.5-coder:14b-devops" => vec!["qwen2.5-coder-14b-devops.modelfile".into()],
             "qwen2.5-coder:14b-quick" => vec!["qwen2.5-coder-14b-quick.modelfile".into()],
             "qwen2.5-coder:7b-quick" => vec!["qwen2.5-coder-7b-quick.modelfile".into()],
+            "deepseek-r1:32b" => vec!["deepseek-r1-32b.modelfile".into()],
             "nomic-embed-text:latest" | "nomic-embed-text" => vec![],
             _ => {
                 let base = model.replace([':', '.'], "-");
@@ -1346,6 +1494,7 @@ fn get_modfile_for_model(model: &str, platform: Platform, dir: &Path) -> Option<
             "qwen3-coder:30b-gpu" => vec!["qwen3-coder-30b-gpu.modelfile".into()],
             "gemma4:26b-devops" => vec!["gemma4-26b-devops.modelfile".into()],
             "devstral-small-2-gpu" => vec!["devstral-small-2-gpu.modelfile".into()],
+            "deepseek-r1:32b-gpu" => vec!["deepseek-r1-32b-gpu.modelfile".into()],
             "nomic-embed-text:latest" | "nomic-embed-text" => vec![],
             _ => {
                 let base = model.replace([':', '.'], "-");

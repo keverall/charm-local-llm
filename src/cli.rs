@@ -98,6 +98,9 @@ pub enum ModelsAction {
         /// Model name
         model: String,
     },
+    /// Check the Ollama library for newer releases of your pulled models and
+    /// recommend upgrades (evaluated against your local VRAM budget)
+    CheckUpdates,
 }
 
 #[derive(Parser)]

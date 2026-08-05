@@ -108,8 +108,47 @@ The local physical verification baseline for KevCharm maps directly to secure cl
 | ------- | ------ | ------ |
 | `gemma4:26b-devops` | Primary DevOps — coding, complex reasoning | ~17GB |
 | `qwen3-coder:30b-gpu` | Coding — general purpose coder | ~18GB |
+| `deepseek-r1:32b-gpu` | Reasoning — architecture decisions, root-cause, trade-offs | ~20GB |
 | `devstral-small-2-gpu` | Quick — fast responses, simple tasks | ~15GB |
 | `nomic-embed-text` | Embeddings for semantic search (768 dims) | ~300MB |
+
+> **VRAM note:** with a single 24 GB card only **one** large model can be resident at a
+> time (`OLLAMA_MAX_LOADED_MODELS=1`). `kcharm` evicts the other model before loading the
+> requested one, so switching models incurs a one-time load. Keep `deepseek-r1:32b` for
+> reasoning tasks and `qwen3-coder:30b-gpu` for codegen; don't try to hold both plus
+> `gemma4` simultaneously.
+
+## Local Model Selection
+
+All three large models run locally on the 24 GB RTX 4090 (and on 32 GB Apple Silicon). They
+are **complementary, not interchangeable** — pick by task:
+
+- **`qwen3-coder:30b-gpu`** — *write* code and IaC.
+- **`deepseek-r1:32b-gpu`** — *reason* about systems, designs, and failures.
+- **`gemma4:26b-devops`** — *explain* and *review* with the broadest regulated-banking context.
+
+### Comparative summary
+
+| | `qwen3-coder:30b-gpu` | `deepseek-r1:32b-gpu` | `gemma4:26b-devops` |
+|---|---|---|---|
+| **Type** | Dedicated coder | Reasoning (thinking trace) | General + DevOps-tuned |
+| **Best at** | Terraform/Ansible/YAML, full functions, multi-language codegen | Architecture decisions, root-cause, trade-off analysis, "why" | Explanations, design review, broad reasoning |
+| **Codegen quality** | ★★★★★ | ★★★☆☆ (correct, but verbose) | ★★★☆☆ |
+| **Reasoning depth** | ★★★☆☆ | ★★★★★ | ★★★★☆ |
+| **Speed** | Fast | Slower (thinking tokens) | Fast |
+| **Regulated-banking context** | Strong | Strong | Strongest (devops-specialized) |
+| **Pros** | Best raw code output; follows HCL/schema; long context | Transparent step-by-step reasoning; great at novel/ambiguous problems | Balanced; strong at review + architecture narrative |
+| **Cons** | Weak on open-ended "why"; can over-generate | Slow; burns tokens on `<think>`; weaker at large code dumps | Weaker raw codegen than a coder model |
+| **Optimal use** | "Write a VPC module", "fix this playbook", "generate a pipeline" | "Why is this pod crashlooping?", "compare EKS vs GKE for EMIR", "design a PrivateLink topology" | "Review this Terraform for PCI gaps", "explain this architecture" |
+| **Anti-patterns (where it sucks)** | Don't ask it to *architect* from scratch or justify trade-offs — it'll produce plausible-but-shallow structure | Don't use it for high-throughput code completion or huge file dumps — the thinking overhead dominates | Don't use it as your primary *generator* for large IaC — quality lags a coder model |
+
+### Recommended pairing for your workload
+
+Your stack is **mostly Terraform IaC + multi-language codegen + regulated banking reasoning**.
+Use `qwen3-coder:30b-gpu` as the default coding/agent model, `deepseek-r1:32b-gpu` for
+planning/review/thinking tasks, and `gemma4:26b-devops` as the broad reasoning/review
+fallback. `kcharm models check-updates` evaluates these against the live Ollama library and
+your VRAM budget and tells you when a newer release is worth pulling.
 
 ## Crush Integration
 
