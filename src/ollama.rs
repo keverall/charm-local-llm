@@ -269,10 +269,10 @@ impl OllamaClient {
             if mf_path.exists() {
                 if let Err(e) = self.create_model(model_name, &mf_path).await {
                     warn!(
-                        "Failed to create from modfile: {}, falling back to registry pull",
-                        e
+                        "Failed to create model '{}' from modfile: {}",
+                        model_name, e
                     );
-                    self.pull_model(model_name).await?;
+                    return Err(e);
                 }
                 return Ok(());
             }
