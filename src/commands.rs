@@ -1355,16 +1355,11 @@ fn install_systemd_env(config: &Config) -> bool {
 }
 
 async fn warmup_models(client: &OllamaClient, config: &Config) -> anyhow::Result<()> {
-    let mut models_to_warm: Vec<String> = if let Some(dm) = &config.devops_model {
-        vec![dm.clone()]
-    } else {
-        vec![]
-    };
-    if let Some(qm) = &config.quick_model {
-        if !models_to_warm.contains(qm) {
-            models_to_warm.push(qm.clone());
-        }
+    let mut models_to_warm: Vec<String> = vec![];
+    if let Some(dm) = &config.devops_model {
+        models_to_warm.push(dm.clone());
     }
+
     for model in models_to_warm {
         let timeout = if model.contains("30b") || model.contains("26b") || model.contains("27b") {
             300
