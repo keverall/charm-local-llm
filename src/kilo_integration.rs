@@ -328,28 +328,136 @@ pub fn patch_kilo_indexing_at_path(
     }
 
     if changed {
-        // Never write a config that violates the Kilo schema — a malformed
-        // kilo.jsonc breaks Kilo entirely. Validate first and abort the write
-        // (keeping the previous, working file) if the constructed JSON is bad.
-        let violations = validate_kilo_config(&json);
-        if !violations.is_empty() {
-            for v in &violations {
-                warn!("kilo.json schema violation (NOT written): {}", v);
-            }
-            anyhow::bail!(
-                "Refusing to write kilo.jsonc: {} schema violation(s). \
-                 Keeping the previous config to avoid breaking Kilo. \
-                 First violation: {}",
-                violations.len(),
-                violations[0]
-            );
-        }
-        let new_content = serde_json::to_string_pretty(&json)?;
-        std::fs::write(path, new_content)?;
-        info!("kilo.json updated at {}", path.display());
+        // Validate every proposed write to kilo.jsonc against the bundled
+        // Kilo schema. We attempt up to 3 passes, auto-fixing what we can
+        // (stripping stale numeric model options that break the Ollama
+        // OpenAI-compatible API) on each pass; only a schema-valid file is
+        // written. If a valid file cannot be produced after 3 attempts we FAIL
+        // GRACEFULLY: return a clear, actionable error and leave the existing
+        // (working) file untouched — a malformed kilo.jsonc would break Kilo
+        // entirely.
+        write_schema_validated(path, &mut json)?;
     }
 
     Ok(changed)
+}
+
+/// Keys that must never appear in a provider model entry: they are silently
+/// ignored or rejected by Ollama's OpenAI-compatible API and cause runtime
+/// errors (type `must be of type integer`, etc.).
+const STALE_MODEL_OPTION_KEYS: &[&str] = &[
+    "num_gpu",
+    "num_batch",
+    "num_thread",
+    "num_ctx",
+    "num_predict",
+];
+
+/// Strip stale/numeric-only option keys from every model entry under every
+/// `provider.*.models` object in the Kilo config. Returns `true` if anything
+/// was removed. Safe to call repeatedly (no-ops once clean).
+fn sanitize_kilo_model_options(json: &mut Value) -> bool {
+    let Some(providers) = json.get_mut("provider").and_then(|p| p.as_object_mut()) else {
+        return false;
+    };
+    let mut fixed = false;
+    for (_provider_id, provider_entry) in providers.iter_mut() {
+        let Some(models) = provider_entry
+            .get_mut("models")
+            .and_then(|m| m.as_object_mut())
+        else {
+            continue;
+        };
+        for (_model_id, model_entry) in models.iter_mut() {
+            if let Some(entry_obj) = model_entry.as_object_mut() {
+                for bad in STALE_MODEL_OPTION_KEYS {
+                    if entry_obj.remove(*bad).is_some() {
+                        fixed = true;
+                    }
+                }
+            }
+        }
+    }
+    fixed
+}
+
+/// Stamp a valid Kilo schema reference onto the config object's `$schema`
+/// field. Replaces the bogus/incomplete `"$schema"` values (e.g.
+/// `http://schemastore.org` or an empty string) and inserts one when missing,
+/// so editors and `jsonschema` validators agree on the right schema.
+fn stamp_kilo_schema(json: &mut Value, url: &str) {
+    let obj = match json.as_object_mut() {
+        Some(o) => o,
+        None => return,
+    };
+    let replace = match obj.get("$schema") {
+        None => true,
+        Some(v) => match v.as_str() {
+            None => true,
+            Some(s) => s != url && !s.starts_with("https://app.kilo.ai/"),
+        },
+    };
+    if replace {
+        obj.insert("$schema".to_string(), Value::String(url.to_string()));
+    }
+}
+
+/// Write `json` to `path` only after it passes the Kilo schema. Up to 3 repair
+/// attempts are made (each runs the auto-fixers, then re-validates). If the
+/// config still does not validate after 3 attempts, this fails with a helpful
+/// exception and does **not** write — leaving Kilo on the previous, working
+/// file. The `attempt` count is surfaced in the log for diagnostics.
+fn write_schema_validated(path: &Path, json: &mut Value) -> anyhow::Result<()> {
+    const MAX_ATTEMPTS: usize = 3;
+    const KILO_SCHEMA_URL: &str = "https://app.kilo.ai/config.json";
+
+    let mut last_violations: Vec<String> = Vec::new();
+
+    for attempt in 1..=MAX_ATTEMPTS {
+        // Always stamp a valid Kilo schema reference so editors validate the file
+        // against Kilo's real schema. This also replaces the bogus placeholder
+        // `"$schema": "http://schemastore.org"` that breaks editor validation.
+        stamp_kilo_schema(json, KILO_SCHEMA_URL);
+
+        let violations = validate_kilo_config(json);
+        if violations.is_empty() {
+            let new_content = serde_json::to_string_pretty(json)?;
+            std::fs::write(path, new_content)?;
+            info!(
+                "kilo.jsonc schema-valid — written to {} (attempt {}/{})",
+                path.display(),
+                attempt,
+                MAX_ATTEMPTS
+            );
+            return Ok(());
+        }
+
+        last_violations = violations.clone();
+
+        // Auto-fix what we can and retry.
+        let fixed = sanitize_kilo_model_options(json);
+        if !fixed {
+            // No repairer could touch this violation; retrying won't help.
+            for v in &last_violations {
+                warn!("kilo.jsonc schema violation (unfixable on retry): {}", v);
+            }
+            break;
+        }
+    }
+
+    for v in &last_violations {
+        warn!("kilo.jsonc schema violation (NOT written): {}", v);
+    }
+    anyhow::bail!(
+        "Refusing to write kilo.jsonc: still {} schema violation(s) after {} attempt(s). \
+         The existing file has been left untouched so Kilo is not broken.\n \
+         First violation: {}\n \
+         Fix the value below in ~/.config/kilo/kilo.jsonc, or run `kcharm kilo init --reset`, \
+         then re-run `kcharm start`.",
+        last_violations.len(),
+        MAX_ATTEMPTS,
+        last_violations.first().cloned().unwrap_or_default()
+    )
 }
 
 /// Return a human-readable display name for a model ID, using a known mapping
@@ -664,8 +772,10 @@ pub fn clean_project_kilo_config(project_root: &Path, config: &Config) -> anyhow
     }
 
     if changed {
-        let new_content = serde_json::to_string_pretty(&json)?;
-        std::fs::write(&path, new_content)?;
+        // Validate the project kilo.jsonc too (same rules as the user config)
+        // so a schema-invalid edit is never silently written and breaks Kilo
+        // in this project tree.
+        write_schema_validated(&path, &mut json)?;
     }
 
     Ok(changed)
@@ -886,5 +996,93 @@ mod tests {
             !violations.is_empty(),
             "invalid config should have produced schema violations"
         );
+    }
+
+    #[test]
+    fn subagent_variant_overrides_is_allowed() {
+        // Real Kilo configs contain `subagent_variant_overrides`; the relaxed
+        // root schema must NOT reject it (this was the cause of the false
+        // "Additional properties are not allowed" aborts that left Kilo broken).
+        let cfg = json!({
+            "model": "openrouter/hy3",
+            "subagent_variant_overrides": { "build": "low", "plan": "high" },
+            "provider": {
+                "Ollama Local (FREE)": {
+                    "models": {
+                        "gemma4-26b-devops": {"name": "gemma4-26b-devops"}
+                    },
+                    "options": {"baseURL": "http://localhost:11434/v1/"}
+                }
+            },
+            "indexing": {
+                "enabled": true,
+                "provider": "ollama",
+                "model": "nomic-embed-text",
+                "ollama": {"baseUrl": "http://localhost:11434/"},
+                "vectorStore": "qdrant",
+                "qdrant": {"url": "http://localhost:6333/"},
+                "dimension": 768
+            }
+        });
+        assert!(
+            validate_kilo_config(&cfg).is_empty(),
+            "subagent_variant_overrides should be schema-valid: {:?}",
+            validate_kilo_config(&cfg)
+        );
+    }
+
+    #[test]
+    fn sanitize_kilo_model_options_strips_stale_keys() {
+        let mut cfg = json!({
+            "provider": {
+                "Ollama Local (FREE)": {
+                    "models": {
+                        "gemma4-26b-devops": {"name": "g", "num_gpu": 50, "num_ctx": 4096},
+                        "other-provider/model-x": {"name": "x", "num_threads": 4}
+                    }
+                }
+            }
+        });
+        let fixed = sanitize_kilo_model_options(&mut cfg);
+        assert!(fixed, "should have removed stale option keys");
+        assert!(
+            cfg["provider"]["Ollama Local (FREE)"]["models"]["gemma4-26b-devops"]
+                .as_object()
+                .unwrap()
+                .get("num_gpu")
+                .is_none(),
+            "num_gpu must be stripped"
+        );
+        assert_eq!(
+            cfg["provider"]["Ollama Local (FREE)"]["models"]["gemma4-26b-devops"]["name"],
+            json!("g")
+        );
+        // A second pass is a no-op.
+        assert!(!sanitize_kilo_model_options(&mut cfg));
+    }
+
+    #[test]
+    fn write_schema_validated_bails_on_unfixable_without_writing() {
+        // `model` must be a string; an integer is a hard schema violation that
+        // no auto-fixer can repair. write_schema_validated must therefore
+        // bail and leave the file untouched.
+        let dir = std::env::temp_dir();
+        let path = dir.join("kilo_test_should_not_be_written.json");
+        // Pre-write a sentinel so we can prove we did not overwrite.
+        std::fs::write(&path, "{\"sentinel\": true}").unwrap();
+        let mut cfg = json!({ "model": 123 });
+        let result = write_schema_validated(&path, &mut cfg);
+        let err = result.expect_err("expected graceful failure for an unfixable schema violation");
+        assert!(
+            err.to_string().contains("schema violation"),
+            "error must mention schema violation, got: {err}"
+        );
+        // File must be untouched (still the sentinel, NOT the bad config).
+        let untouched = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            untouched.contains("sentinel") && !untouched.contains("123"),
+            "write_schema_validated must not overwrite an unfixable config; got: {untouched}"
+        );
+        let _ = std::fs::remove_file(&path);
     }
 }

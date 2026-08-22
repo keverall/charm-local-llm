@@ -1129,15 +1129,22 @@
       }
      }
     },
-    "subagent_model": {
-     "type": [
-      "string",
-      "null"
-     ]
-    }
+     "subagent_model": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "subagent_variant_overrides": {
+      "type": "object",
+      "additionalProperties": {
+       "type": "string"
+      },
+      "description": "Per-agent default model variant overrides (e.g. {\"build\": \"low\"})"
+     }
+    },
+    "additionalProperties": true
    },
-   "additionalProperties": false
-  },
   "Model": {
    "type": "string",
    "enum": [
