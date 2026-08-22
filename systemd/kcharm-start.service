@@ -23,6 +23,11 @@ Environment=KCHARM_PROJECT_ROOT=@PROJECT_ROOT@
 # Wait for the Docker daemon (and the Ollama system service) before starting,
 # otherwise Qdrant's `docker compose up` races the daemon at boot.
 ExecStartPre=/usr/bin/env sh -c 'for i in $(seq 1 60); do docker info >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'
+# Wait for the Ollama model registry so model pulls don't silently fail on a
+# reboot before the network is up. Best-effort: always proceeds (exit 0) so the
+# final decision stays with `kcharm start`, which waits, shows a popup, and
+# exits 1 if the network never comes up.
+ExecStartPre=/usr/bin/env sh -c 'for i in $(seq 1 90); do curl -fsS --max-time 5 https://registry.ollama.ai >/dev/null 2>&1 && exit 0; sleep 2; done; exit 0'
 ExecStart=@KCHARM_BIN@ start
 TimeoutStartSec=900
 StandardOutput=journal

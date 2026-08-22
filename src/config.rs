@@ -13,6 +13,7 @@ pub struct Config {
     pub ollama_kv_cache_type: String,
     pub ollama_flash_attention: Option<u8>,
     pub ollama_gpu_layers: Option<u16>,
+    pub ollama_keep_alive: Option<String>,
     pub ollama_models_path: Option<PathBuf>,
     pub default_models: Vec<String>,
     pub devops_model: Option<String>,
@@ -173,7 +174,7 @@ impl Config {
             ollama_port: 11434,
             ollama_bin: "ollama".into(),
             ollama_base_url: "http://localhost:11434".into(),
-            ollama_num_parallel: if platform.is_macos() { 4 } else { 4 },
+            ollama_num_parallel: 4,
             // A single 24GB RTX 4090 cannot keep two large devops models
             // resident at once (gemma4-26b-devops ~17GB + qwen3-coder:30b-gpu
             // ~21GB > 24GB), so Ollama must evict the other before
@@ -187,6 +188,7 @@ impl Config {
             ollama_kv_cache_type,
             ollama_flash_attention,
             ollama_gpu_layers,
+            ollama_keep_alive: None,
             ollama_models_path: Some(if platform.is_macos() {
                 dirs::home_dir()
                     .unwrap_or_else(|| PathBuf::from("."))
@@ -249,6 +251,9 @@ impl Config {
             if let Ok(l) = v.parse::<u16>() {
                 self.ollama_gpu_layers = Some(l);
             }
+        }
+        if let Some(v) = env.get("OLLAMA_KEEP_ALIVE") {
+            self.ollama_keep_alive = Some(v.clone());
         }
         if let Some(v) = env.get("OLLAMA_MODELS") {
             let value = if let Some(stripped) = v.strip_prefix("~/") {

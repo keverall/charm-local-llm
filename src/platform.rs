@@ -2,6 +2,9 @@ use crate::Platform;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
+
+use anyhow::Result;
 
 pub fn detect_platform(override_str: Option<&str>) -> Platform {
     if let Some(o) = override_str {
@@ -127,6 +130,37 @@ pub fn check_nvidia_smi() -> Option<String> {
     None
 }
 
+/// Parse a single `.env` value: strip a trailing inline `#` comment (only when
+/// the `#` is outside quotes and preceded by whitespace) and surrounding
+/// double quotes. Without this, a value like `"50"   # comment` leaks the quote
+/// and comment into the resolved value, producing a broken
+/// `OLLAMA_KEEP_ALIVE=2m"   # ...` line in /etc/default/ollama.
+fn parse_env_value(raw: &str) -> String {
+    let mut in_quotes = false;
+    let mut comment_at: Option<usize> = None;
+    for (i, c) in raw.char_indices() {
+        if c == '"' {
+            in_quotes = !in_quotes;
+        } else if c == '#' && !in_quotes {
+            let prev_ws = i == 0
+                || raw[..i]
+                    .chars()
+                    .next_back()
+                    .map(|p| p.is_whitespace())
+                    .unwrap_or(true);
+            if prev_ws {
+                comment_at = Some(i);
+                break;
+            }
+        }
+    }
+    let trimmed = match comment_at {
+        Some(i) => &raw[..i],
+        None => raw,
+    };
+    trimmed.trim().trim_matches('"').to_string()
+}
+
 pub fn load_env_file(path: &PathBuf) -> HashMap<String, String> {
     let mut env = HashMap::new();
     if !path.exists() {
@@ -141,8 +175,8 @@ pub fn load_env_file(path: &PathBuf) -> HashMap<String, String> {
             }
             if let Some((key, value)) = line.split_once('=') {
                 let key = key.trim();
-                let value = value.trim().trim_matches('"');
-                env.insert(key.into(), value.into());
+                let value = parse_env_value(value);
+                env.insert(key.into(), value);
             }
         }
     }
@@ -272,4 +306,79 @@ pub fn ensure_docker_running() -> bool {
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
     false
+}
+
+/// Best-effort check that the Ollama model registry is reachable. Every
+/// `ensure_model` pull depends on `registry.ollama.ai`, so if this host is
+/// unreachable there is no point attempting pulls — they would fail and
+/// (historically) be swallowed, leaving DEFAULT_MODELS silently missing.
+pub async fn registry_reachable() -> bool {
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(8))
+        .build()
+        .unwrap_or_default();
+
+    // `GET /v2/` returns 404/401 unless authenticated, so it is NOT a
+    // reliable reachability probe. Instead hit a manifest endpoint under
+    // `/v2/library/<image>/manifests/<tag>` which returns 200 when the
+    // registry is reachable (and any non-network error is treated as
+    // unreachable).
+    let url = "https://registry.ollama.ai/v2/library/qwen3-coder/manifests/latest";
+    client
+        .get(url)
+        .send()
+        .await
+        .map(|r| r.status().is_success() || r.status().is_redirection())
+        .unwrap_or(false)
+}
+
+/// Wait up to `max_wait_secs` for the Ollama model registry to become
+/// reachable. If it never does, alert the user with a desktop popup and return
+/// an error so the caller aborts `kcharm start` loudly (exit 1) instead of
+/// producing a half-populated store. The popup is best-effort (it needs a
+/// running session); the error is always surfaced to the journal/terminal too.
+pub async fn wait_for_registry_or_alert(max_wait_secs: u64) -> Result<()> {
+    let start = std::time::Instant::now();
+    while start.elapsed().as_secs() < max_wait_secs {
+        if registry_reachable().await {
+            return Ok(());
+        }
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+    // Final attempt in case the loop exited immediately after a check.
+    if registry_reachable().await {
+        return Ok(());
+    }
+
+    let title = "kcharm: no internet — models not loaded";
+    let body = "kcharm could not reach the Ollama model registry, so the models in \
+DEFAULT_MODELS were NOT pulled. Your local store will be missing models. \
+Connect to the internet and re-run `make sod` (or reboot).";
+    desktop_notify(title, body);
+    anyhow::bail!(
+        "No connectivity to the Ollama model registry after {}s. Aborting start so models are \
+         not silently missing. Connect to the internet and re-run `make sod` (or reboot).",
+        max_wait_secs
+    )
+}
+
+/// Show a desktop notification popup (best-effort). Uses the platform-native
+/// mechanism: notify-send on Linux, osascript on macOS. Failures are ignored —
+/// the message is always also surfaced to the terminal/journal by the caller.
+pub fn desktop_notify(title: &str, body: &str) {
+    #[cfg(target_os = "macos")]
+    {
+        let script = format!(
+            "display notification \"{}\" with title \"{}\"",
+            body.replace('"', "\\\""),
+            title.replace('"', "\\\"")
+        );
+        let _ = Command::new("osascript").args(["-e", &script]).status();
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = Command::new("notify-send")
+            .args(["-u", "critical", title, body])
+            .status();
+    }
 }

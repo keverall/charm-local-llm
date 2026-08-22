@@ -726,6 +726,13 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         }
     }
 
+    // Before pulling models, confirm we can reach the Ollama model registry. A
+    // failed pull used to be only warned and swallowed, so a reboot without
+    // connectivity left DEFAULT_MODELS silently missing. Now we wait for the
+    // network and, if it never arrives, pop up an alert and abort loudly
+    // (exit 1) rather than producing a half-populated store.
+    crate::platform::wait_for_registry_or_alert(180).await?;
+
     println!("📦 Ensuring models are present...");
     let client = OllamaClient::new(config.clone());
 
@@ -1235,6 +1242,13 @@ fn print_resolved_config(config: &Config) {
             .unwrap_or_else(|| "auto".into())
     );
     println!(
+        "  Keep alive:          {}",
+        config
+            .ollama_keep_alive
+            .clone()
+            .unwrap_or_else(|| "ollama default (5m)".into())
+    );
+    println!(
         "  Models path:         {}",
         config
             .ollama_models_path
@@ -1326,6 +1340,10 @@ fn install_systemd_env(config: &Config) -> bool {
         "OLLAMA_KV_CACHE_TYPE={}\n",
         config.ollama_kv_cache_type
     ));
+
+    if let Some(ka) = &config.ollama_keep_alive {
+        final_content.push_str(&format!("OLLAMA_KEEP_ALIVE={}\n", ka));
+    }
 
     // Try to write with sudo if not root
     let is_root = unsafe { libc::geteuid() } == 0;

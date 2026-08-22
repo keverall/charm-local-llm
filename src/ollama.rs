@@ -398,6 +398,9 @@ pub fn start_ollama_direct(config: &Config, log_file: &PathBuf) -> anyhow::Resul
         if let Some(gpu_layers) = config.ollama_gpu_layers {
             cmd.env("OLLAMA_GPU_LAYERS", gpu_layers.to_string());
         }
+        if let Some(ka) = &config.ollama_keep_alive {
+            cmd.env("OLLAMA_KEEP_ALIVE", ka);
+        }
     }
 
     if let Some(ref models_path) = config.ollama_models_path {
