@@ -124,3 +124,14 @@ yarn-error.log*
 # ---- GENERATED DOCS ----
 docs/dynamic-code-docs/
 wip/
+
+# ---- LOCAL RUNTIME / VECTOR STORE (huge binary noise) ----
+data/
+.crush/
+*.mmap
+*.sst
+*.wal
+
+# ---- GENERATED DEPENDENCY DUMPS ----
+deps.txt
+deps-outdated.txt

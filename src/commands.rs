@@ -121,7 +121,6 @@ fn write_privileged_file(path: &Path, content: &str, mode: u32) -> bool {
         return false;
     };
     let content = content.as_bytes().to_vec();
-    let chmod_mode = format!("{:o}", mode);
 
     // Run the blocking sudo work off the async runtime entirely.
     let handle = std::thread::spawn(move || {
@@ -140,11 +139,6 @@ fn write_privileged_file(path: &Path, content: &str, mode: u32) -> bool {
             let _ = stdin.write_all(&content);
         }
         let ok = child.wait().map(|s| s.success()).unwrap_or(false);
-        if ok {
-            let _ = ProcessCommand::new("sudo")
-                .args(["-n", "chmod", &chmod_mode, &p])
-                .status();
-        }
         ok
     });
     handle.join().unwrap_or(false)
