@@ -203,9 +203,34 @@ pub fn project_root_marker_path() -> PathBuf {
         .join("project-root")
 }
 
-/// True when `dir` looks like the charm-local-llm checkout.
-fn is_project_root(dir: &Path) -> bool {
-    dir.join("Cargo.toml").exists() || dir.join("docker-compose.yml").exists()
+/// True only when `dir` is the actual charm-local-llm checkout.
+///
+/// A loose check (any dir with a `docker-compose.yml`) caused `kcharm` to
+/// hijack unrelated repos that happen to contain a compose file (e.g. a
+/// sibling `image-build-automation` checkout), running their containers
+/// instead of this repo's Qdrant stack. We now require the real signature:
+/// a `Cargo.toml` whose package is `charm-local-llm` plus the entry point.
+fn is_charm_repo(dir: &Path) -> bool {
+    let cargo = dir.join("Cargo.toml");
+    if !cargo.exists() || !dir.join("src").join("main.rs").exists() {
+        return false;
+    }
+    match std::fs::read_to_string(&cargo) {
+        Ok(content) => content.contains("name = \"charm-local-llm\""),
+        Err(_) => false,
+    }
+}
+
+/// Locate the charm-local-llm checkout by walking up from the running
+/// executable, so the project root resolves correctly regardless of the
+/// current working directory.
+fn charm_repo_from_exe() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+    exe_dir
+        .ancestors()
+        .find(|dir| is_charm_repo(dir))
+        .map(|dir| dir.to_path_buf())
 }
 
 /// Persist the resolved project root so boot-time runs can find it.
@@ -220,7 +245,7 @@ pub fn save_project_root(root: &Path) -> std::io::Result<()> {
 fn marker_project_root() -> Option<PathBuf> {
     let content = std::fs::read_to_string(project_root_marker_path()).ok()?;
     let path = PathBuf::from(content.trim());
-    if is_project_root(&path) {
+    if is_charm_repo(&path) {
         Some(path)
     } else {
         None
@@ -236,15 +261,21 @@ pub fn resolve_project_root(override_path: Option<PathBuf>) -> PathBuf {
     // Explicit environment override (used by the systemd user unit).
     if let Ok(env_root) = std::env::var("KCHARM_PROJECT_ROOT") {
         let path = PathBuf::from(env_root);
-        if is_project_root(&path) {
+    if is_charm_repo(&path) {
             return path;
         }
+    }
+
+    // Resolve from the running executable — this works no matter what the
+    // current directory is, so `kcharm` always targets this repo.
+    if let Some(root) = charm_repo_from_exe() {
+        return root;
     }
 
     // Walk up from the current directory looking for the checkout.
     if let Ok(current) = std::env::current_dir() {
         for dir in current.ancestors() {
-            if is_project_root(dir) {
+            if is_charm_repo(dir) {
                 return dir.to_path_buf();
             }
         }
@@ -255,7 +286,10 @@ pub fn resolve_project_root(override_path: Option<PathBuf>) -> PathBuf {
         return root;
     }
 
-    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    // Last resort: the executable-relative repo, else the current directory.
+    charm_repo_from_exe().unwrap_or_else(|| {
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    })
 }
 
 /// Ensure the Docker daemon is running, starting it via systemd if needed.

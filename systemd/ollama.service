@@ -32,6 +32,12 @@ Environment=OLLAMA_PORT=11434
 Environment=OLLAMA_NUM_PARALLEL=4
 Environment=OLLAMA_MAX_LOADED_MODELS=1
 
+# Keep Ollama's runtime state off the root partition: the `ollama` user's home
+# is `/usr/share/ollama` (on /), which previously filled root with models. Point
+# HOME at the fast secondary NVMe so `.ollama` (history, etc.) lives on the SSD
+# alongside OLLAMA_MODELS (set in /etc/default/ollama).
+Environment=HOME=/mnt/nvme1n1/ollama
+
 # Restart policy: `ondemand` is NOT a valid systemd value (it was silently
 # ignored, leaving the service with no restart policy at all).
 Restart=on-failure

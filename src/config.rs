@@ -169,7 +169,11 @@ impl Config {
             ollama_host: if platform.is_macos() {
                 "127.0.0.1:11434".into()
             } else {
-                "[::]:11434".into()
+                // Ollama does not parse the bracketed `[::]:port` form; it falls
+                // back to 127.0.0.1 (IPv4-only), which makes the `[::1]` health
+                // probe fail. `::` is Ollama's valid "all IPv6" bind, and with
+                // net.ipv6.bindv6only=0 it is dual-stack (accepts 127.0.0.1 too).
+                "::".into()
             },
             ollama_port: 11434,
             ollama_bin: "ollama".into(),
@@ -195,7 +199,12 @@ impl Config {
                     .join(".ollama")
                     .join("models")
             } else {
-                PathBuf::from("/home/ollama/models")
+                // Keep the model store off the root partition and on the fast
+                // secondary NVMe (`/mnt/nvme1n1`). The `ollama` user's home
+                // (`/usr/share/ollama`) is on root and previously filled it; the
+                // unit also overrides HOME to this path so runtime state stays
+                // on the SSD too.
+                PathBuf::from("/mnt/nvme1n1/ollama/models")
             }),
             default_models,
             devops_model,
