@@ -439,7 +439,14 @@ fn test_macos_m5_32gb_defaults_to_27b_devops() {
 fn test_config_models_path_cachyos_is_home_ollama() {
     let config = Config::default(Platform::CachyOS);
     let mp = config.ollama_models_path.as_ref().unwrap();
-    assert_eq!(mp, std::path::Path::new("/home/ollama/models"));
+    // Portable: the default store lives under the ollama user's home and ends
+    // in `ollama/models`. The exact parent is machine-specific and overridden
+    // via OLLAMA_MODELS in the platform .env, so assert the structure, not the path.
+    assert!(
+        mp.ends_with("ollama/models"),
+        "expected store at .../ollama/models, got {mp:?}"
+    );
+    assert!(mp.is_absolute());
 }
 
 #[test]

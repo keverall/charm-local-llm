@@ -6,8 +6,7 @@ use crate::cli::{
 use crate::ollama::{ollama_running, start_ollama_direct, OllamaClient};
 use crate::platform::{
     check_nvidia_smi, compose_command, detect_platform, detect_platform_env_path,
-    ensure_docker_running, find_docker_compose, find_ollama_bin, load_env_file,
-    resolve_project_root, save_project_root,
+    ensure_docker_running, find_ollama_bin, load_env_file, resolve_project_root, save_project_root,
 };
 use crate::{Config, Platform};
 use std::path::{Path, PathBuf};
@@ -138,8 +137,7 @@ fn write_privileged_file(path: &Path, content: &str, mode: u32) -> bool {
         if let Some(mut stdin) = child.stdin.take() {
             let _ = stdin.write_all(&content);
         }
-        let ok = child.wait().map(|s| s.success()).unwrap_or(false);
-        ok
+        child.wait().map(|s| s.success()).unwrap_or(false)
     });
     handle.join().unwrap_or(false)
 }
@@ -555,8 +553,6 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
     config = config.with_env_overrides(env_vars);
 
     println!("🚀 Starting Ollama DevOps Environment...");
-    // Keep the recorded project root fresh whenever we start from a real
-    // checkout, so login/boot runs resolve the same repo.
     if config.project_root.join("docker-compose.yml").exists() {
         let _ = save_project_root(&config.project_root);
     }
@@ -592,7 +588,7 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         anyhow::bail!("Ollama binary not found. Please install Ollama first.");
     }
 
-    if let Platform::CachyOS | Platform::Linux = config.platform {
+    if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
         if let Some(gpu_info) = check_nvidia_smi() {
             println!("   GPU Status: {}", gpu_info);
         } else {
@@ -600,31 +596,43 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         }
     }
 
-    // One-time OS bootstrap (idempotent, best-effort): ensure the systemd unit
-    // and env file exist before attempting to start the service. NOTE: this
-    // never writes /etc/sudoers (see forbid_sudoers_write) — sudoers setup is a
-    // separate, validated one-time step via `kcharm service install`.
-    // These are synchronous blocking operations, so they run inside
-    // spawn_blocking within the async body below.
-
-    // One-time OS bootstrap (idempotent, best-effort): ensure the systemd unit
-    // and env file exist. Runs in spawn_blocking because it performs blocking
-    // sudo/file I/O and `start()` itself executes inside the tokio runtime.
-    if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
-        let cfg: Config = config.clone();
-        let _ = tokio::task::spawn_blocking(move || {
-            let _ = install_systemd_unit(&cfg);
-            let _ = install_systemd_env(&cfg);
-            ensure_ollama_models_dir(cfg);
-        })
-        .await;
+    phase_bootstrap_systemd(&config).await;
+    phase_ensure_ollama(&config).await?;
+    let client = phase_ensure_models(&config).await?;
+    println!("🐳 Starting Qdrant...");
+    if let Err(e) = start_qdrant(&config).await {
+        warn!("   Failed to start Qdrant: {}", e);
+        println!("   ⚠️  Qdrant not started: {}", e);
     }
+    phase_configure_assistants(&config, &client).await;
 
-    // If Ollama is already serving, leave it alone — restarting risks a port
-    // collision and wedges `make sod`. We only (re)launch when it's down.
-    // ollama_running uses reqwest::blocking, so it must run off the async
-    // runtime (inside spawn_blocking).
-    let already_running = tokio::task::spawn_blocking(move || ollama_running(config.ollama_port))
+    println!("✅✅✅ Environment Started Successfully ✅✅✅");
+    Ok(())
+}
+
+/// One-time OS bootstrap (idempotent, best-effort): install the systemd unit,
+/// write the env file, and ensure the models dir exists with correct ownership.
+/// Never writes /etc/sudoers (guarded by `forbid_sudoers_write`). All blocking
+/// sudo/file I/O runs inside `spawn_blocking` so it never blocks the async runtime.
+async fn phase_bootstrap_systemd(config: &Config) {
+    if !matches!(config.platform, Platform::CachyOS | Platform::Linux) {
+        return;
+    }
+    let cfg = config.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        let _ = install_systemd_unit(&cfg);
+        let _ = install_systemd_env(&cfg);
+        ensure_ollama_models_dir(cfg);
+    })
+    .await;
+}
+
+/// Start Ollama (or leave it alone if already running), then block until the API
+/// responds. Aborts if it never comes up. Blocking operations (systemctl, pkill,
+/// fork/exec, blocking reqwest) stay inside `spawn_blocking`.
+async fn phase_ensure_ollama(config: &Config) -> anyhow::Result<()> {
+    let port = config.ollama_port;
+    let already_running = tokio::task::spawn_blocking(move || ollama_running(port))
         .await
         .unwrap_or(false);
     if already_running {
@@ -634,22 +642,18 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         );
     } else {
         println!("🛑 Stopping existing Ollama processes...");
-
-        // Try systemctl stop with passwordless sudo, silently skip if not available
         if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
-            let _ = run_systemctl(&config, &["stop", "ollama"]);
-            let _ = run_systemctl(&config, &["daemon-reload"]);
+            let _ = run_systemctl(config, &["stop", "ollama"]);
+            let _ = run_systemctl(config, &["daemon-reload"]);
         }
-
         let _ = ProcessCommand::new("pkill")
             .args(["-f", "ollama serve"])
             .output();
-
         std::thread::sleep(Duration::from_secs(2));
         println!("✅ Previous Ollama instances stopped.");
-
         println!("🚀 Starting Ollama server...");
     }
+
     let log_dir = config.project_root.join("logs");
     std::fs::create_dir_all(&log_dir).ok();
     let log_file = log_dir.join(format!(
@@ -658,29 +662,19 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
     ));
 
     if !already_running {
-        if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
-            let systemd_works = run_systemctl(&config, &["start", "ollama"])?;
-
+        let systemd_works = matches!(config.platform, Platform::CachyOS | Platform::Linux)
+            && run_systemctl(config, &["start", "ollama"])?;
+        if systemd_works {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+        }
+        let port = config.ollama_port;
+        let running = tokio::task::spawn_blocking(move || ollama_running(port))
+            .await
+            .unwrap_or(false);
+        if !running {
             if systemd_works {
-                tokio::time::sleep(Duration::from_secs(3)).await;
-
-                let port = config.ollama_port;
-                let running = tokio::task::spawn_blocking(move || ollama_running(port))
-                    .await
-                    .unwrap_or(false);
-
-                if !running {
-                    warn!("systemctl start failed to start Ollama, falling back to direct start");
-                    let cfg = config.clone();
-                    let lf = log_file.clone();
-                    tokio::task::spawn_blocking(move || start_ollama_direct(&cfg, &lf)).await??;
-                }
-            } else {
-                let cfg = config.clone();
-                let lf = log_file.clone();
-                tokio::task::spawn_blocking(move || start_ollama_direct(&cfg, &lf)).await??;
+                warn!("systemctl start failed to start Ollama, falling back to direct start");
             }
-        } else {
             let cfg = config.clone();
             let lf = log_file.clone();
             tokio::task::spawn_blocking(move || start_ollama_direct(&cfg, &lf)).await??;
@@ -702,29 +696,15 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
 
-    println!("🔍 Testing API connectivity...");
-    for addr in &["127.0.0.1", "[::1]", "localhost"] {
-        let url = format!("http://{}:{}/api/tags", addr, config.ollama_port);
-        let url_clone = url.clone();
-        let result = tokio::task::spawn_blocking(move || {
-            reqwest::blocking::get(&url_clone)
-                .map(|r| r.status().is_success())
-                .unwrap_or(false)
-        })
-        .await
-        .unwrap_or(false);
-        if result {
-            println!("  {}: ✅ OK", url);
-        } else {
-            println!("  {}: ❌ FAIL", url);
-        }
-    }
+    println!("✅ Ollama API ready on port {}", config.ollama_port);
+    Ok(())
+}
 
-    // Before pulling models, confirm we can reach the Ollama model registry. A
-    // failed pull used to be only warned and swallowed, so a reboot without
-    // connectivity left DEFAULT_MODELS silently missing. Now we wait for the
-    // network and, if it never arrives, pop up an alert and abort loudly
-    // (exit 1) rather than producing a half-populated store.
+/// Wait for the model registry, then pull/create/warm every model in
+/// DEFAULT_MODELS. Returns the `OllamaClient` so callers can reuse it for status
+/// and config generation. Base models pulled only as `FROM` dependencies are
+/// cleaned up afterward.
+async fn phase_ensure_models(config: &Config) -> anyhow::Result<OllamaClient> {
     crate::platform::wait_for_registry_or_alert(180).await?;
 
     println!("📦 Ensuring models are present...");
@@ -746,7 +726,6 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
             models_to_check.push((dm.clone(), mf));
         }
     }
-
     if let Some(ref qm) = config.quick_model {
         if !models_to_check.iter().any(|(m, _)| m == qm) {
             let mf = get_modfile_for_model(qm, config.platform, &config.modfile_dir);
@@ -761,28 +740,18 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
     }
 
     println!("🔥 Warming up models...");
-    let _ = warmup_models(&client, &config).await;
+    let _ = warmup_models(&client, config).await;
 
-    // Remove base models that kcharm pulled as FROM dependencies but aren't
-    // explicitly listed in DEFAULT_MODELS — keeps the store lean (only tuned
-    // modelfile models + nomic-embed-text). Best-effort; warns on failure.
-    //
-    // Ollama server sometimes appends ":latest" to a model name when listing
-    // (e.g. "foo" becomes "foo:latest"). We normalize both sides by stripping
-    // a trailing ":latest" so the comparison is robust.
     let normalize = |name: &str| -> String {
-        if let Some(stripped) = name.strip_suffix(":latest") {
-            stripped.to_string()
-        } else {
-            name.to_string()
-        }
+        name.strip_suffix(":latest")
+            .map(String::from)
+            .unwrap_or_else(|| name.to_string())
     };
     let default_set: std::collections::HashSet<String> =
         config.default_models.iter().map(|d| normalize(d)).collect();
     let existing = client.list_models().await.unwrap_or_default();
     for m in &existing {
-        let is_default = default_set.contains(&normalize(&m.name));
-        if !is_default {
+        if !default_set.contains(&normalize(&m.name)) {
             info!(
                 "Removing non-default model '{}' (base dependency cleanup)",
                 m.name
@@ -791,20 +760,18 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         }
     }
 
-    if find_docker_compose().is_some() {
-        println!("🐳 Starting Qdrant...");
-        if let Err(e) = start_qdrant(&config).await {
-            warn!("   Failed to start Qdrant: {}", e);
-            println!("   ⚠️  Qdrant not started: {}", e);
-        }
-    }
+    Ok(client)
+}
 
+/// Generate Crush + Kilo configs, AGENTS.md, and .kiloignore, then print the
+/// final environment status. Pure output phase — failures are warned, not fatal.
+async fn phase_configure_assistants(config: &Config, client: &OllamaClient) {
     println!("🔧 Configuring coding assistants...");
-    match crate::crush::write_crush_config(&config) {
+    match crate::crush::write_crush_config(config) {
         Ok(path) => println!("   ✅ Crush config: {}", path.display()),
         Err(e) => warn!("   Failed to write Crush config: {}", e),
     }
-    match crate::crush::write_crush_md(&config, &config.project_root) {
+    match crate::crush::write_crush_md(config, &config.project_root) {
         Ok(path) => println!("   ✅ CRUSH.md: {}", path.display()),
         Err(e) => warn!("   Failed to write CRUSH.md: {}", e),
     }
@@ -815,7 +782,7 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         .into_iter()
         .map(|m| m.name)
         .collect();
-    match crate::kilo_integration::patch_kilo_indexing(&config, Some(&available_models)) {
+    match crate::kilo_integration::patch_kilo_indexing(config, Some(&available_models)) {
         Ok(true) => println!(
             "   ✅ Kilo config updated (provider models synced to {} Ollama models)",
             available_models.len()
@@ -823,20 +790,14 @@ async fn start(args: StartArgs, verbose: bool) -> anyhow::Result<()> {
         Ok(false) => println!("   ✅ Kilo config up to date"),
         Err(e) => warn!("   Failed to patch Kilo config: {}", e),
     }
-    let _ = crate::kilo_integration::clean_project_kilo_config(&config.project_root, &config);
-    match crate::kilo_integration::write_agents_md(&config, &config.project_root) {
+    let _ = crate::kilo_integration::clean_project_kilo_config(&config.project_root, config);
+    match crate::kilo_integration::write_agents_md(config, &config.project_root) {
         Ok(path) => println!("   ✅ AGENTS.md: {}", path.display()),
         Err(e) => warn!("   Failed to write AGENTS.md: {}", e),
     }
-    let _ = crate::kilo_integration::ensure_kiloignore(&config);
-
+    let _ = crate::kilo_integration::ensure_kiloignore(config);
     reload_vscode_window();
-
-    print_final_status(&client).await;
-
-    println!("✅✅✅ Environment Started Successfully ✅✅✅");
-
-    Ok(())
+    print_final_status(client).await;
 }
 
 async fn stop(args: StopArgs, verbose: bool) -> anyhow::Result<()> {

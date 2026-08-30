@@ -327,6 +327,11 @@ pub fn patch_kilo_indexing_at_path(
         changed = true;
     }
 
+    if ensure_kilo_mcp(obj) {
+        info!("kilo.json: ensured 'duckduckgo-search' MCP server (free web search)");
+        changed = true;
+    }
+
     if changed {
         // Validate every proposed write to kilo.jsonc against the bundled
         // Kilo schema. We attempt up to 3 passes, auto-fixing what we can
@@ -771,6 +776,14 @@ pub fn clean_project_kilo_config(project_root: &Path, config: &Config) -> anyhow
         changed = true;
     }
 
+    if ensure_kilo_mcp(obj) {
+        info!(
+            "Ensured 'duckduckgo-search' MCP server in {}",
+            path.display()
+        );
+        changed = true;
+    }
+
     if changed {
         // Validate the project kilo.jsonc too (same rules as the user config)
         // so a schema-invalid edit is never silently written and breaks Kilo
@@ -779,6 +792,58 @@ pub fn clean_project_kilo_config(project_root: &Path, config: &Config) -> anyhow
     }
 
     Ok(changed)
+}
+
+/// Ensure the DuckDuckGo web search MCP server is present so Kilo has a
+/// reliable, free (no API key / registration) web search engine.
+///
+/// Kilo's config key for MCP servers is `mcp` (NOT `mcpServers`), and local
+/// servers must use `type: "local"` with a `command` array — this matches the
+/// bundled Kilo schema (`McpLocalConfig`). Idempotent: it never removes or
+/// overwrites user-defined MCP servers, only adds the known DuckDuckGo one when
+/// missing or different.
+fn ensure_kilo_mcp(obj: &mut serde_json::Map<String, Value>) -> bool {
+    let expected = json!({
+        "type": "local",
+        "command": ["npx", "-y", "@modelcontextprotocol/server-duckduckgo"]
+    });
+
+    let mut changed = false;
+
+    // Migrate a stray `mcpServers` block (Claude-Desktop/opencode style) into
+    // Kilo's actual `mcp` key. Kilo ignores `mcpServers`, so leaving it makes
+    // the config look wrong even though it is schema-valid. Folding preserves
+    // any user servers defined there.
+    if let Some(stray) = obj.remove("mcpServers") {
+        if let Some(stray_obj) = stray.as_object() {
+            let mcp = obj.entry("mcp").or_insert_with(|| json!({}));
+            if let Some(mcp_obj) = mcp.as_object_mut() {
+                for (k, v) in stray_obj {
+                    mcp_obj.entry(k).or_insert(v.clone());
+                }
+            }
+        }
+        changed = true;
+    }
+
+    let mcp = obj.entry("mcp").or_insert_with(|| json!({}));
+    let mcp_obj = match mcp.as_object_mut() {
+        Some(o) => o,
+        None => {
+            *mcp = json!({});
+            mcp.as_object_mut().unwrap()
+        }
+    };
+
+    match mcp_obj.get("duckduckgo-search") {
+        Some(existing) if existing == &expected => {}
+        _ => {
+            mcp_obj.insert("duckduckgo-search".to_string(), expected);
+            changed = true;
+        }
+    }
+
+    changed
 }
 
 fn patch_kilo_providers(
@@ -1027,6 +1092,48 @@ mod tests {
         assert!(
             validate_kilo_config(&cfg).is_empty(),
             "subagent_variant_overrides should be schema-valid: {:?}",
+            validate_kilo_config(&cfg)
+        );
+    }
+
+    #[test]
+    fn ensure_kilo_mcp_adds_schema_valid_duckduckgo_server() {
+        let mut obj = serde_json::Map::new();
+        assert!(ensure_kilo_mcp(&mut obj), "should add the mcp server");
+        assert!(!ensure_kilo_mcp(&mut obj), "second pass is a no-op");
+
+        let mcp = obj.get("mcp").expect("mcp key present");
+        let server = &mcp["duckduckgo-search"];
+        assert_eq!(server["type"], json!("local"));
+        assert_eq!(
+            server["command"],
+            json!(["npx", "-y", "@modelcontextprotocol/server-duckduckgo"])
+        );
+
+        // The whole config (with the mcp block) must pass the Kilo schema.
+        let cfg = json!({
+            "model": "openrouter/hy3",
+            "agent": {"code": {"model": "openrouter/hy3"}},
+            "provider": {
+                "Ollama Local (FREE)": {
+                    "models": {"gemma4-26b-devops": {"name": "gemma4-26b-devops"}},
+                    "options": {"baseURL": "http://localhost:11434/v1/"}
+                }
+            },
+            "indexing": {
+                "enabled": true,
+                "provider": "ollama",
+                "model": "nomic-embed-text",
+                "ollama": {"baseUrl": "http://localhost:11434/"},
+                "vectorStore": "qdrant",
+                "qdrant": {"url": "http://localhost:6333/"},
+                "dimension": 768
+            },
+            "mcp": mcp.clone()
+        });
+        assert!(
+            validate_kilo_config(&cfg).is_empty(),
+            "config with duckduckgo mcp must be schema-valid: {:?}",
             validate_kilo_config(&cfg)
         );
     }

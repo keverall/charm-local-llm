@@ -200,10 +200,11 @@ impl Config {
                     .join("models")
             } else {
                 // Keep the model store off the root partition and on the fast
-                // secondary NVMe (`/mnt/nvme1n1`). The `ollama` user's home
-                // (`/usr/share/ollama`) is on root and previously filled it; the
-                // unit also overrides HOME to this path so runtime state stays
-                // on the SSD too.
+                // secondary NVMe (`/mnt/nvme1n1`). Letting blobs land on root
+                // fills the 147GB system disk and crashes the OS, so this
+                // override is required — not optional. The `ollama` user's home
+                // (`/usr/share/ollama`) is on root; the systemd unit also
+                // overrides HOME to this path so runtime state follows.
                 PathBuf::from("/mnt/nvme1n1/ollama/models")
             }),
             default_models,

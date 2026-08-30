@@ -261,7 +261,7 @@ pub fn resolve_project_root(override_path: Option<PathBuf>) -> PathBuf {
     // Explicit environment override (used by the systemd user unit).
     if let Ok(env_root) = std::env::var("KCHARM_PROJECT_ROOT") {
         let path = PathBuf::from(env_root);
-    if is_charm_repo(&path) {
+        if is_charm_repo(&path) {
             return path;
         }
     }
@@ -287,9 +287,8 @@ pub fn resolve_project_root(override_path: Option<PathBuf>) -> PathBuf {
     }
 
     // Last resort: the executable-relative repo, else the current directory.
-    charm_repo_from_exe().unwrap_or_else(|| {
-        std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
-    })
+    charm_repo_from_exe()
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")))
 }
 
 /// Ensure the Docker daemon is running, starting it via systemd if needed.
