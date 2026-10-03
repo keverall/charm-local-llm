@@ -198,11 +198,13 @@ cargo run -- status
 
 ## Installation
 
-`make setup` builds and installs `kcharm` to `~/.local/bin/`. If `~/.local/bin` is not in your PATH:
+`make setup` builds and installs `kcharm` to `~/.local/bin/`. For zsh, add this to
+`~/.zshrc` if that directory is not already in your PATH:
 
-- **Fish**: `set -U fish_user_paths ~/.local/bin $fish_user_paths`
-- **Bash**: `echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc`
-- **PowerShell**: `[Environment]::SetEnvironmentVariable('PATH', $env:PATH + ';$HOME\.local\bin', 'User')`
+```zsh
+export PATH="$HOME/.local/bin:$PATH"
+source ~/.zshrc
+```
 
 Or install manually:
 
@@ -249,8 +251,6 @@ make run ARGS="<command>"  # Run CLI with args (e.g., make run ARGS="start")
 
 # Installation targets
 make install      # Build and install kcharm to ~/.local/bin
-make setup-fish   # Install and add to fish PATH
-make setup-powershell # Install for PowerShell
 
 # Convenience targets (wraps 'cargo run -- <command>')
 make run-start    # Start Ollama + models + Qdrant

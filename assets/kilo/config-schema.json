@@ -1080,7 +1080,11 @@
        "maximum": 9007199254740991,
        "description": "Timeout in milliseconds for model context protocol (MCP) requests"
       },
-      "policies": {
+       "speech_to_text_model": {
+        "type": "string",
+        "description": "Model used for speech-to-text transcription"
+       },
+       "policies": {
        "type": "array",
        "items": {
         "$ref": "#/$defs/ConfigV2.Experimental.Policy"

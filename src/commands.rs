@@ -3,7 +3,7 @@ use crate::cli::{
     ModelsArgs, QdrantAction, QdrantArgs, ServiceAction, ServiceArgs, StartArgs, StatusArgs,
     StopArgs,
 };
-use crate::ollama::{ollama_running, start_ollama_direct, OllamaClient};
+use crate::ollama::{ollama_running, ollama_version_mismatch, start_ollama_direct, OllamaClient};
 use crate::platform::{
     check_nvidia_smi, compose_command, detect_platform, detect_platform_env_path,
     ensure_docker_running, find_ollama_bin, load_env_file, resolve_project_root, save_project_root,
@@ -233,7 +233,13 @@ fn install_systemd_unit(config: &Config) -> anyhow::Result<()> {
         );
         return Ok(());
     }
-    let content = std::fs::read_to_string(&src)?;
+    let ollama_bin = if config.ollama_bin == "ollama" {
+        find_ollama_bin().unwrap_or_else(|| PathBuf::from(&config.ollama_bin))
+    } else {
+        PathBuf::from(&config.ollama_bin)
+    };
+    let content =
+        std::fs::read_to_string(&src)?.replace("@OLLAMA_BIN@", &ollama_bin.to_string_lossy());
     let dest = PathBuf::from("/etc/systemd/system/ollama.service");
 
     let needs_copy = if dest.exists() {
@@ -635,12 +641,38 @@ async fn phase_ensure_ollama(config: &Config) -> anyhow::Result<()> {
     let already_running = tokio::task::spawn_blocking(move || ollama_running(port))
         .await
         .unwrap_or(false);
+    let mut needs_start = !already_running;
     if already_running {
-        println!(
-            "✅ Ollama already running on port {}; skipping stop/start.",
-            config.ollama_port
-        );
-    } else {
+        let cfg = config.clone();
+        let mismatch = tokio::task::spawn_blocking(move || ollama_version_mismatch(&cfg))
+            .await
+            .ok()
+            .flatten();
+        if let Some((client, server)) = mismatch {
+            println!(
+                "🔄 Ollama version mismatch (installed client {}, running server {}); restarting.",
+                client, server
+            );
+            if matches!(config.platform, Platform::CachyOS | Platform::Linux)
+                && run_systemctl(config, &["restart", "ollama"])?
+            {
+                tokio::time::sleep(Duration::from_secs(3)).await;
+                let port = config.ollama_port;
+                needs_start = !tokio::task::spawn_blocking(move || ollama_running(port))
+                    .await
+                    .unwrap_or(false);
+            } else {
+                needs_start = true;
+            }
+        } else {
+            println!(
+                "✅ Ollama already running on port {}; skipping stop/start.",
+                config.ollama_port
+            );
+        }
+    }
+
+    if needs_start {
         println!("🛑 Stopping existing Ollama processes...");
         if matches!(config.platform, Platform::CachyOS | Platform::Linux) {
             let _ = run_systemctl(config, &["stop", "ollama"]);
@@ -661,7 +693,7 @@ async fn phase_ensure_ollama(config: &Config) -> anyhow::Result<()> {
         chrono::Utc::now().format("%Y%m%d%H%M%S")
     ));
 
-    if !already_running {
+    if needs_start {
         let systemd_works = matches!(config.platform, Platform::CachyOS | Platform::Linux)
             && run_systemctl(config, &["start", "ollama"])?;
         if systemd_works {

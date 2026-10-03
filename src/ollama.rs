@@ -1,5 +1,6 @@
 use crate::config::Config;
 use crate::modelfile::parse_modelfile_content;
+use crate::platform::find_ollama_bin;
 use regex::Regex;
 use reqwest::Client;
 use std::path::PathBuf;
@@ -368,8 +369,68 @@ pub fn ollama_running(port: u16) -> bool {
     false
 }
 
+fn ollama_executable(config: &Config) -> PathBuf {
+    if config.ollama_bin == "ollama" {
+        find_ollama_bin().unwrap_or_else(|| PathBuf::from("ollama"))
+    } else {
+        PathBuf::from(&config.ollama_bin)
+    }
+}
+
+/// Return the version of the running Ollama server, if its version endpoint is
+/// available. This is deliberately separate from `ollama_running`: a healthy
+/// server may still be running an older binary after pacman upgraded Ollama.
+pub fn ollama_server_version(port: u16) -> Option<String> {
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .ok()?;
+    let response = client
+        .get(format!("http://127.0.0.1:{}/api/version", port))
+        .send()
+        .ok()?
+        .error_for_status()
+        .ok()?;
+    response
+        .json::<serde_json::Value>()
+        .ok()?
+        .get("version")
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+}
+
+/// Return the installed Ollama client version. Ollama prints the server
+/// version first when connected, followed by `client version is ...` when the
+/// two differ, so prefer the explicit client-version line when present.
+pub fn ollama_binary_version(config: &Config) -> Option<String> {
+    let output = Command::new(ollama_executable(config))
+        .arg("--version")
+        .output()
+        .ok()?;
+    let text = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let client_marker = "client version is ";
+    text.lines()
+        .find_map(|line| line.split_once(client_marker).map(|(_, v)| v.trim()))
+        .or_else(|| {
+            text.lines()
+                .find_map(|line| line.strip_prefix("ollama version is ").map(str::trim))
+        })
+        .map(str::to_owned)
+}
+
+pub fn ollama_version_mismatch(config: &Config) -> Option<(String, String)> {
+    let server = ollama_server_version(config.ollama_port)?;
+    let client = ollama_binary_version(config)?;
+    (server != client).then_some((client, server))
+}
+
 pub fn start_ollama_direct(config: &Config, log_file: &PathBuf) -> anyhow::Result<(u32, bool)> {
-    let mut cmd = Command::new(&config.ollama_bin);
+    let executable = ollama_executable(config);
+    let mut cmd = Command::new(executable);
     cmd.arg("serve");
 
     cmd.env("OLLAMA_HOST", &config.ollama_host);

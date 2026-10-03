@@ -176,6 +176,79 @@ fn test_patch_kilo_indexing_preserves_and_repairs_block() {
 }
 
 #[test]
+fn test_patch_kilo_indexing_reconciles_legacy_kilo_json() {
+    // A legacy ~/.config/kilo/kilo.json (older Kilo) has the strict upstream
+    // schema and the user's curated MCP servers, but NO duckduckgo and NO
+    // indexing block. Patching a file *named* kilo.json must: preserve the
+    // user's servers, add the duckduckgo-search server, stamp the local
+    // relaxed schema, and write the sibling schema file.
+    let dir = std::env::temp_dir().join("kilo_legacy_test");
+    std::fs::create_dir_all(&dir).unwrap();
+    let tmp = dir.join("kilo.json");
+    let content = serde_json::json!({
+        "$schema": "https://app.kilo.ai/config.json",
+        "mcp": {
+            "azure": {
+                "type": "local",
+                "command": ["npx", "-y", "@azure/mcp", "server", "start"]
+            }
+        }
+    });
+    std::fs::write(&tmp, serde_json::to_string(&content).unwrap()).unwrap();
+
+    let config = Config {
+        ollama_port: 11434,
+        qdrant_port: 6333,
+        ..Config::default(Platform::CachyOS)
+    };
+    let changed =
+        charm_local_llm::kilo_integration::patch_kilo_indexing_at_path(&tmp, &config, None)
+            .unwrap();
+    assert!(changed);
+
+    let patched: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&tmp).unwrap()).unwrap();
+
+    // Schema must be re-pointed at the local relaxed schema.
+    assert_eq!(
+        patched["$schema"], "kilo-config-schema.json",
+        "strict upstream schema must be replaced with the local relaxed one"
+    );
+
+    // User's curated server preserved.
+    assert!(
+        patched["mcp"]["azure"]["type"] == "local",
+        "must preserve the user's azure server: {}",
+        patched["mcp"]
+    );
+    // duckduckgo-search must be added (not present in legacy file originally).
+    let ddg = &patched["mcp"]["duckduckgo-search"];
+    assert_eq!(ddg["type"], "local");
+    assert_eq!(
+        ddg["command"],
+        serde_json::json!(["npx", "-y", "@modelcontextprotocol/server-duckduckgo"])
+    );
+    // Indexing + Ollama provider must be present on the reconciled file.
+    assert!(
+        patched.get("indexing").is_some(),
+        "indexing block must be added"
+    );
+    assert!(
+        patched["provider"].get("Ollama Local (FREE)").is_some(),
+        "Ollama provider must be added"
+    );
+    // Sibling relaxed schema must be written next to the config.
+    assert!(
+        std::path::Path::new(&dir)
+            .join("kilo-config-schema.json")
+            .exists(),
+        "sibling schema file must be written"
+    );
+
+    std::fs::remove_dir_all(&dir).ok();
+}
+
+#[test]
 fn test_patch_kilo_indexing_syncs_dynamic_models() {
     let tmp = std::env::temp_dir().join("kilo_test_dynamic_models.json");
     // Start with a stale provider that has num_gpu, duplicates, and unloaded models

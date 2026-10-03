@@ -92,7 +92,13 @@ fn detect_system_ram_gb() -> u64 {
 }
 
 pub fn find_ollama_bin() -> Option<PathBuf> {
-    which::which("ollama").ok()
+    // Prefer the distro-managed binary over an older upstream installer copy
+    // in /usr/local/bin. This keeps CachyOS/Arch upgrades effective.
+    ["/usr/bin/ollama", "/opt/homebrew/bin/ollama"]
+        .iter()
+        .map(PathBuf::from)
+        .find(|path| path.is_file())
+        .or_else(|| which::which("ollama").ok())
 }
 
 pub fn find_docker_compose() -> Option<PathBuf> {

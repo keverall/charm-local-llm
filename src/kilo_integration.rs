@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
+use std::time::{Duration, SystemTime};
 use tracing::{info, warn};
 
 /// Bundled Kilo configuration JSON Schema (draft 2020-12). This is the upstream
@@ -22,6 +23,10 @@ const KILO_CONFIG_SCHEMA: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/assets/kilo/config-schema.json"
 ));
+
+const KILO_REFERENCE_SCHEMA_URL: &str = "https://app.kilo.ai/config.json";
+const KILO_REFERENCE_SCHEMA_CACHE: &str = "kilo-config-reference-schema.json";
+const KILO_REFERENCE_SCHEMA_MAX_AGE: Duration = Duration::from_secs(6 * 60 * 60);
 
 /// Parse and compile the bundled schema once and reuse it. Returns `None`
 /// only if the bundled schema itself is corrupt (it should never be).
@@ -44,12 +49,124 @@ pub fn validate_kilo_config(value: &Value) -> Vec<String> {
         // Schema unavailable: be permissive rather than block the whole start.
         return vec![];
     };
-    match schema.validate(value) {
+    let result = match schema.validate(value) {
         Ok(()) => vec![],
         Err(errors) => errors
             .map(|e| format!("{}: {}", e.instance_path, e))
             .collect(),
+    };
+    result
+}
+
+fn validate_against_schema(value: &Value, raw_schema: &Value) -> Vec<String> {
+    let Ok(schema) = jsonschema::JSONSchema::compile(raw_schema) else {
+        return vec!["effective Kilo schema failed to compile".into()];
+    };
+    let result = match schema.validate(value) {
+        Ok(()) => vec![],
+        Err(errors) => errors
+            .map(|e| format!("{}: {}", e.instance_path, e))
+            .collect(),
+    };
+    result
+}
+
+fn managed_kilo_path(path: &Path) -> bool {
+    match (
+        path.file_name().and_then(|n| n.to_str()),
+        path.parent()
+            .and_then(|p| p.file_name())
+            .and_then(|n| n.to_str()),
+    ) {
+        (Some("kilo.json" | "kilo.jsonc"), Some(".kilo")) => true,
+        (Some("kilo.json" | "kilo.jsonc"), Some("kilo")) => path
+            .parent()
+            .and_then(|p| p.parent())
+            .and_then(|p| p.file_name())
+            .is_some_and(|n| n == ".config"),
+        _ => false,
     }
+}
+
+fn merge_reference_schema_updates(local: &mut Value, reference: &Value) {
+    let (Some(local_obj), Some(reference_obj)) = (local.as_object_mut(), reference.as_object())
+    else {
+        return;
+    };
+
+    // Only merge schema maps. Existing local property definitions contain
+    // intentional relaxations (for example free-form Ollama model strings),
+    // so copying reference `anyOf`, `enum`, or scalar constraints into them
+    // would silently undo those relaxations.
+    for key in ["properties", "$defs", "definitions"] {
+        let Some(reference_map) = reference_obj.get(key).and_then(Value::as_object) else {
+            continue;
+        };
+        let local_map = local_obj
+            .entry(key.to_string())
+            .or_insert_with(|| json!({}));
+        let Some(local_map) = local_map.as_object_mut() else {
+            continue;
+        };
+        for (name, reference_value) in reference_map {
+            match local_map.get_mut(name) {
+                Some(local_value) => merge_reference_schema_updates(local_value, reference_value),
+                None => {
+                    local_map.insert(name.clone(), reference_value.clone());
+                }
+            }
+        }
+    }
+}
+
+fn fetch_reference_schema(path: &Path) -> Option<Value> {
+    if !managed_kilo_path(path) {
+        return None;
+    }
+
+    let cache_path = path
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(KILO_REFERENCE_SCHEMA_CACHE);
+    if let Ok(metadata) = std::fs::metadata(&cache_path) {
+        if let Ok(modified) = metadata.modified() {
+            if SystemTime::now()
+                .duration_since(modified)
+                .unwrap_or_default()
+                < KILO_REFERENCE_SCHEMA_MAX_AGE
+            {
+                if let Ok(content) = std::fs::read_to_string(&cache_path) {
+                    if let Ok(schema) = serde_json::from_str(&content) {
+                        return Some(schema);
+                    }
+                }
+            }
+        }
+    }
+
+    let response = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .ok()?
+        .get(KILO_REFERENCE_SCHEMA_URL)
+        .send()
+        .ok()?
+        .error_for_status()
+        .ok()?;
+    let schema: Value = response.json().ok()?;
+    if let Ok(content) = serde_json::to_string_pretty(&schema) {
+        let _ = std::fs::write(&cache_path, content);
+    }
+    Some(schema)
+}
+
+fn effective_kilo_schema(path: &Path) -> Value {
+    let mut schema: Value = serde_json::from_str(KILO_CONFIG_SCHEMA)
+        .expect("bundled Kilo config schema must parse as JSON");
+    if let Some(reference) = fetch_reference_schema(path) {
+        merge_reference_schema_updates(&mut schema, &reference);
+    }
+    schema
 }
 
 pub fn kilo_config_path() -> PathBuf {
@@ -58,6 +175,21 @@ pub fn kilo_config_path() -> PathBuf {
         .join(".config")
         .join("kilo")
         .join("kilo.jsonc")
+}
+
+/// Every global Kilo config file we reconcile. Per Kilo's docs the primary
+/// global config is `~/.config/kilo/kilo.jsonc`, but Kilo also reads and
+/// deep-merges a legacy `~/.config/kilo/kilo.json` when present. We patch each
+/// file that exists so the DuckDuckGo MCP server + the local relaxed schema
+/// land in whichever file the installed Kilo actually loads — this covers both
+/// older Kilo (reads `kilo.json`) and newer Kilo (primary `kilo.jsonc`, merges
+/// `kilo.json`), and avoids a stale legacy `kilo.json` shadowing our edits.
+fn global_kilo_config_paths() -> Vec<PathBuf> {
+    let base = dirs::home_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".config")
+        .join("kilo");
+    vec![base.join("kilo.json"), base.join("kilo.jsonc")]
 }
 
 pub fn verify_kilo_config(config: &Config) -> anyhow::Result<KiloConfigStatus> {
@@ -294,8 +426,23 @@ pub fn patch_kilo_indexing(
     config: &Config,
     available_models: Option<&[String]>,
 ) -> anyhow::Result<bool> {
-    let path = kilo_config_path();
-    patch_kilo_indexing_at_path(&path, config, available_models)
+    let mut changed = false;
+    let mut found = false;
+    for path in global_kilo_config_paths() {
+        if path.exists() {
+            found = true;
+            if patch_kilo_indexing_at_path(&path, config, available_models)? {
+                changed = true;
+            }
+        }
+    }
+    if !found {
+        warn!(
+            "kilo.jsonc not found at {}, skipping patch",
+            kilo_config_path().display()
+        );
+    }
+    Ok(changed)
 }
 
 pub fn patch_kilo_indexing_at_path(
@@ -311,12 +458,26 @@ pub fn patch_kilo_indexing_at_path(
     let content = std::fs::read_to_string(path)?;
     let stripped = strip_jsonc_comments(&content);
     let mut json: Value = serde_json::from_str(&stripped)?;
+    let schema = effective_kilo_schema(path);
+    let preflight = validate_against_schema(&json, &schema);
+    if !preflight.is_empty() {
+        anyhow::bail!(
+            "Refusing to apply Kilo config delta to {}: existing config fails schema validation.\nFirst violation: {}",
+            path.display(),
+            preflight.first().cloned().unwrap_or_default()
+        );
+    }
 
     let obj = json
         .as_object_mut()
         .ok_or_else(|| anyhow::anyhow!("kilo.json is not a JSON object"))?;
 
     let mut changed = false;
+
+    if remove_kilo_permission_policy(obj) {
+        info!("kilo.json: removed unmanaged permission policy; Kilo defaults now apply");
+        changed = true;
+    }
 
     if repair_kilo_indexing(obj, config) {
         info!("kilo.json: preserved/repaired indexing block (Ollama + Qdrant)");
@@ -341,7 +502,7 @@ pub fn patch_kilo_indexing_at_path(
         // GRACEFULLY: return a clear, actionable error and leave the existing
         // (working) file untouched — a malformed kilo.jsonc would break Kilo
         // entirely.
-        write_schema_validated(path, &mut json)?;
+        write_schema_validated_with_schema(path, &mut json, &schema)?;
     }
 
     Ok(changed)
@@ -386,11 +547,33 @@ fn sanitize_kilo_model_options(json: &mut Value) -> bool {
     fixed
 }
 
+/// Remove an accidental top-level Kilo permission override.
+///
+/// kcharm manages local providers, indexing, and MCP entries, but it does not
+/// own Kilo's interactive permission policy. A partial `permission` object can
+/// make every unspecified tool fall back to restrictive defaults, producing
+/// confusing "user specified a rule" errors. Removing it lets Kilo apply its
+/// normal policy and prevents kcharm from preserving a stale override forever.
+fn remove_kilo_permission_policy(obj: &mut serde_json::Map<String, Value>) -> bool {
+    obj.remove("permission").is_some()
+}
+
+/// Filename (relative to a `kilo.jsonc`) of the relaxed schema we ship next to
+/// it. Editors resolve `"$schema"` relative to the config file, so pointing at
+/// this local copy — instead of the strict upstream `app.kilo.ai` schema —
+/// makes editor validation agree with kcharm's own (relaxed) validator. That
+/// matters because kcharm deliberately permits local-Ollama model names
+/// (`qwen3-coder:30b-gpu`, `gemma4-26b-devops`, ...) and keys like
+/// `subagent_model`, none of which the strict upstream schema allows.
+const KILO_LOCAL_SCHEMA_URL: &str = "kilo-config-schema.json";
+
 /// Stamp a valid Kilo schema reference onto the config object's `$schema`
-/// field. Replaces the bogus/incomplete `"$schema"` values (e.g.
-/// `http://schemastore.org` or an empty string) and inserts one when missing,
-/// so editors and `jsonschema` validators agree on the right schema.
-fn stamp_kilo_schema(json: &mut Value, url: &str) {
+/// field. We force the local relaxed schema (written alongside the config),
+/// so editors and kcharm's `jsonschema` validator see the *same* rules rather
+/// than the stricter upstream schema that rejects local model names and
+/// `subagent_model`. Replaces bogus values (e.g. `http://schemastore.org` or an
+/// empty string) and inserts one when missing.
+fn stamp_kilo_schema(json: &mut Value) {
     let obj = match json.as_object_mut() {
         Some(o) => o,
         None => return,
@@ -399,12 +582,26 @@ fn stamp_kilo_schema(json: &mut Value, url: &str) {
         None => true,
         Some(v) => match v.as_str() {
             None => true,
-            Some(s) => s != url && !s.starts_with("https://app.kilo.ai/"),
+            Some(s) => s != KILO_LOCAL_SCHEMA_URL,
         },
     };
     if replace {
-        obj.insert("$schema".to_string(), Value::String(url.to_string()));
+        obj.insert(
+            "$schema".to_string(),
+            Value::String(KILO_LOCAL_SCHEMA_URL.to_string()),
+        );
     }
+}
+
+/// Write the bundled relaxed schema as `<config_dir>/kilo-config-schema.json`
+/// so the config's `"$schema": "kilo-config-schema.json"` resolves to the very
+/// schema kcharm validates against. No-op-safe (overwrites are intentional —
+/// keeps the editor schema in sync with the bundled one).
+fn write_local_schema_sibling(path: &Path, schema: &Value) -> anyhow::Result<()> {
+    let dir = path.parent().unwrap_or(Path::new("."));
+    let schema_path = dir.join(KILO_LOCAL_SCHEMA_URL);
+    std::fs::write(&schema_path, serde_json::to_string_pretty(schema)?)?;
+    Ok(())
 }
 
 /// Write `json` to `path` only after it passes the Kilo schema. Up to 3 repair
@@ -412,24 +609,34 @@ fn stamp_kilo_schema(json: &mut Value, url: &str) {
 /// config still does not validate after 3 attempts, this fails with a helpful
 /// exception and does **not** write — leaving Kilo on the previous, working
 /// file. The `attempt` count is surfaced in the log for diagnostics.
+#[cfg(test)]
 fn write_schema_validated(path: &Path, json: &mut Value) -> anyhow::Result<()> {
+    let schema = effective_kilo_schema(path);
+    write_schema_validated_with_schema(path, json, &schema)
+}
+
+fn write_schema_validated_with_schema(
+    path: &Path,
+    json: &mut Value,
+    schema: &Value,
+) -> anyhow::Result<()> {
     const MAX_ATTEMPTS: usize = 3;
-    const KILO_SCHEMA_URL: &str = "https://app.kilo.ai/config.json";
 
     let mut last_violations: Vec<String> = Vec::new();
 
     for attempt in 1..=MAX_ATTEMPTS {
-        // Always stamp a valid Kilo schema reference so editors validate the file
-        // against Kilo's real schema. This also replaces the bogus placeholder
-        // `"$schema": "http://schemastore.org"` that breaks editor validation.
-        stamp_kilo_schema(json, KILO_SCHEMA_URL);
+        // Always align `$schema` with the local relaxed schema so editors and
+        // kcharm's validator agree. This replaces the strict upstream URL
+        // (`https://app.kilo.ai/config.json`) that rejects local Ollama models.
+        stamp_kilo_schema(json);
 
-        let violations = validate_kilo_config(json);
+        let violations = validate_against_schema(json, schema);
         if violations.is_empty() {
             let new_content = serde_json::to_string_pretty(json)?;
             std::fs::write(path, new_content)?;
+            write_local_schema_sibling(path, schema)?;
             info!(
-                "kilo.jsonc schema-valid — written to {} (attempt {}/{})",
+                "{} schema-valid — written (attempt {}/{})",
                 path.display(),
                 attempt,
                 MAX_ATTEMPTS
@@ -764,6 +971,15 @@ pub fn clean_project_kilo_config(project_root: &Path, config: &Config) -> anyhow
             return Ok(false);
         }
     };
+    let schema = effective_kilo_schema(&path);
+    let preflight = validate_against_schema(&json, &schema);
+    if !preflight.is_empty() {
+        anyhow::bail!(
+            "Refusing to apply Kilo config delta to {}: existing config fails schema validation.\nFirst violation: {}",
+            path.display(),
+            preflight.first().cloned().unwrap_or_default()
+        );
+    }
 
     let obj = match json.as_object_mut() {
         Some(obj) => obj,
@@ -771,6 +987,14 @@ pub fn clean_project_kilo_config(project_root: &Path, config: &Config) -> anyhow
     };
 
     let mut changed = false;
+    if remove_kilo_permission_policy(obj) {
+        info!(
+            "{}: removed unmanaged permission policy; Kilo defaults now apply",
+            path.display()
+        );
+        changed = true;
+    }
+
     if repair_kilo_indexing(obj, config) {
         info!("Preserved/repaired indexing block in {}", path.display());
         changed = true;
@@ -788,7 +1012,7 @@ pub fn clean_project_kilo_config(project_root: &Path, config: &Config) -> anyhow
         // Validate the project kilo.jsonc too (same rules as the user config)
         // so a schema-invalid edit is never silently written and breaks Kilo
         // in this project tree.
-        write_schema_validated(&path, &mut json)?;
+        write_schema_validated_with_schema(&path, &mut json, &schema)?;
     }
 
     Ok(changed)
@@ -1139,6 +1363,39 @@ mod tests {
     }
 
     #[test]
+    fn remove_kilo_permission_policy_is_idempotent() {
+        let mut obj = serde_json::Map::new();
+        obj.insert(
+            "permission".into(),
+            json!({"bash": "allow", "edit": {"*": "allow"}}),
+        );
+        obj.insert("model".into(), json!("openrouter/hy3"));
+
+        assert!(remove_kilo_permission_policy(&mut obj));
+        assert!(!obj.contains_key("permission"));
+        assert!(obj.contains_key("model"));
+        assert!(!remove_kilo_permission_policy(&mut obj));
+    }
+
+    #[test]
+    fn global_kilo_config_paths_covers_legacy_and_primary() {
+        let paths = global_kilo_config_paths();
+        assert_eq!(paths.len(), 2, "must reconcile both global files");
+        let file_names: Vec<&str> = paths
+            .iter()
+            .map(|p| p.file_name().unwrap().to_str().unwrap())
+            .collect();
+        assert!(
+            file_names.contains(&"kilo.json"),
+            "legacy kilo.json must be reconciled: {file_names:?}"
+        );
+        assert!(
+            file_names.contains(&"kilo.jsonc"),
+            "primary kilo.jsonc must be reconciled: {file_names:?}"
+        );
+    }
+
+    #[test]
     fn sanitize_kilo_model_options_strips_stale_keys() {
         let mut cfg = json!({
             "provider": {
@@ -1166,6 +1423,71 @@ mod tests {
         );
         // A second pass is a no-op.
         assert!(!sanitize_kilo_model_options(&mut cfg));
+    }
+
+    #[test]
+    fn write_schema_validated_stamps_local_schema_and_writes_sibling() {
+        let dir = std::env::temp_dir();
+        let path = dir.join("kilo_test_local_schema_stamps.json");
+        let _ = std::fs::remove_file(&path);
+
+        let good = json!({
+            "model": "openrouter/hy3",
+            "agent": {"code": {"model": "openrouter/hy3"}},
+            "permission": {"bash": "allow", "edit": {"*": "allow"}, "read": {"*": "allow"}},
+            "provider": {
+                "Ollama Local (FREE)": {
+                    "models": {"gemma4-26b-devops": {"name": "gemma4-26b-devops"}},
+                    "options": {"baseURL": "http://localhost:11434/v1/"}
+                }
+            },
+            "indexing": {
+                "enabled": true,
+                "provider": "ollama",
+                "model": "nomic-embed-text",
+                "ollama": {"baseUrl": "http://localhost:11434/"},
+                "vectorStore": "qdrant",
+                "qdrant": {"url": "http://localhost:6333/"},
+                "dimension": 768
+            },
+            "mcp": {
+                "duckduckgo-search": {
+                    "type": "local",
+                    "command": ["npx", "-y", "@modelcontextprotocol/server-duckduckgo"]
+                }
+            },
+            "subagent_model": "openrouter/hy3-low",
+            "subagent_variant_overrides": {"openrouter/hy3-low": "low"},
+            "experimental": {
+                "speech_to_text_model": "nvidia/parakeet-tdt-0.6b-v3"
+            }
+        });
+
+        write_schema_validated(&path, &mut good.clone()).expect("valid config must write");
+
+        let written = std::fs::read_to_string(&path).unwrap();
+        let out: serde_json::Value = serde_json::from_str(&written).unwrap();
+        // `$schema` must point at the local relaxed schema (not the strict upstream).
+        assert_eq!(
+            out["$schema"],
+            json!(KILO_LOCAL_SCHEMA_URL),
+            "editor must validate against the local relaxed schema"
+        );
+        // The sibling schema file must exist next to the config so the `$schema`
+        // reference resolves.
+        let sibling = path.with_file_name(KILO_LOCAL_SCHEMA_URL);
+        assert!(sibling.exists(), "sibling schema file must be written");
+
+        let sibling_content = std::fs::read_to_string(&sibling).unwrap();
+        let sibling_json: Value = serde_json::from_str(&sibling_content).unwrap();
+        let bundled_json: Value = serde_json::from_str(KILO_CONFIG_SCHEMA).unwrap();
+        assert_eq!(
+            sibling_json, bundled_json,
+            "sibling must match bundled schema"
+        );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(&sibling);
     }
 
     #[test]

@@ -44,7 +44,7 @@ Restart=on-failure
 RestartSec=5
 
 # Executable and arguments
-ExecStart=/usr/local/bin/ollama serve
+ExecStart=@OLLAMA_BIN@ serve
 ExecStop=/bin/kill -TERM $MAINPID
 
 # GPU device access - only active if OLLAMA_GPU_LAYERS is set > 0

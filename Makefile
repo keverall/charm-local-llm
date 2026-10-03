@@ -60,9 +60,11 @@ setup-checks:
 
 install: build ## Build and install kcharm to ~/.local/bin
 	@mkdir -p ~/.local/bin
-	@cp target/debug/$(BIN_NAME) ~/.local/bin/$(BIN_NAME)
+	@tmp="$$(mktemp ~/.local/bin/$(BIN_NAME).XXXXXX)"; \
+	cp target/debug/$(BIN_NAME) "$$tmp" && chmod 755 "$$tmp" && \
+	mv -f "$$tmp" ~/.local/bin/$(BIN_NAME) || { rm -f "$$tmp"; exit 1; }
 	@echo "[install] $(BIN_NAME) -> ~/.local/bin/$(BIN_NAME)"
-	@echo "PATH: bash/zsh export PATH=\"\$$HOME/.local/bin:\$$PATH\" | fish set -U fish_user_paths \$$HOME/.local/bin \$$fish_user_paths | pwsh [Environment]::SetEnvironmentVariable('PATH', \$$env:PATH + ';\$$HOME\.local\bin', 'User')"
+	@echo "PATH: add 'export PATH=\"\$$HOME/.local/bin:\$$PATH\"' to ~/.zshrc, then run 'source ~/.zshrc'"
 
 # ─── Build ────────────────────────────────────────────────────────────────────
 .PHONY: build build-release build-check
@@ -155,7 +157,7 @@ sod: ## Start-of-day: update deps, build, install, then kcharm start
 	@$(MAKE) deps-update
 	@$(MAKE) build
 	@$(MAKE) install
-	@command -v kcharm >/dev/null 2>&1 && kcharm start || $(CARGO) run --profile $(PROFILE) -- start
+	@if command -v kcharm >/dev/null 2>&1; then kcharm start; else $(CARGO) run --profile $(PROFILE) -- start; fi
 
 bootstrap: ## One-time OS bootstrap: systemd unit, passwordless sudo, autostart
 	@command -v kcharm >/dev/null 2>&1 && kcharm service install || $(CARGO) run --profile $(PROFILE) -- service install
