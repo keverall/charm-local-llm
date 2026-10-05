@@ -1,7 +1,7 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct Modelfile {
     pub from: Option<String>,
     pub parameters: Vec<ModelParameter>,
@@ -12,13 +12,13 @@ pub struct Modelfile {
     pub messages: Vec<ChatMessage>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct ModelParameter {
     pub key: String,
     pub value: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
@@ -81,7 +81,13 @@ pub fn parse_modelfile_content(content: &str) -> anyhow::Result<Modelfile> {
                         system_content.push_str(content);
                     }
                 } else {
-                    system_content.push_str(rest);
+                    let value = rest.strip_prefix('"').unwrap_or(rest);
+                    if value.ends_with('"') {
+                        system_content.push_str(value.trim_end_matches('"'));
+                        in_system = false;
+                    } else {
+                        system_content.push_str(value);
+                    }
                 }
             }
         } else if in_system {
@@ -102,6 +108,12 @@ pub fn parse_modelfile_content(content: &str) -> anyhow::Result<Modelfile> {
                     }
                     system_content.push_str(line);
                 }
+            } else if line.ends_with('"') {
+                if !system_content.is_empty() {
+                    system_content.push('\n');
+                }
+                system_content.push_str(line.trim_end_matches('"'));
+                in_system = false;
             } else if line.is_empty() && !system_content.is_empty() {
                 in_system = false;
             } else {
@@ -138,10 +150,47 @@ pub fn parse_modelfile_content(content: &str) -> anyhow::Result<Modelfile> {
     }
 
     if !system_content.is_empty() {
-        modelfile.system = Some(system_content.trim_end().to_string());
+        let system = system_content.trim_end();
+        let system = system
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .unwrap_or(system)
+            .to_string();
+        modelfile.system = Some(system);
     }
 
     Ok(modelfile)
+}
+
+/// Compare a source Modelfile with Ollama's generated representation.
+/// Ollama replaces FROM with a blob path and adds defaults, so only values
+/// explicitly present in the source file are meaningful for delta checks.
+pub fn modelfiles_match(desired: &Modelfile, current: &Modelfile) -> bool {
+    if let Some(from) = &desired.from {
+        let Some(current_from) = &current.from else {
+            return false;
+        };
+        if current_from != from && !current_from.starts_with('/') {
+            return false;
+        }
+    }
+
+    if desired.system != current.system {
+        return false;
+    }
+
+    if let Some(template) = &desired.template {
+        if current.template.as_ref() != Some(template) {
+            return false;
+        }
+    }
+
+    desired.parameters.iter().all(|parameter| {
+        current.parameters.iter().any(|candidate| {
+            candidate.key == parameter.key
+                && candidate.value.trim_matches('"') == parameter.value.trim_matches('"')
+        })
+    })
 }
 
 pub fn optimize_for_cachyos_4090(

@@ -64,7 +64,10 @@ impl OllamaClient {
             for m in arr {
                 models.push(ModelInfo {
                     name: m.get("name").and_then(|v| v.as_str()).unwrap_or("").into(),
-                    size: m.get("size").and_then(|v| v.as_str()).unwrap_or("").into(),
+                    size: m
+                        .get("size")
+                        .map(|v| v.to_string())
+                        .unwrap_or_default(),
                     modified_at: m
                         .get("modified_at")
                         .and_then(|v| v.as_str())
@@ -106,6 +109,24 @@ impl OllamaClient {
             }
         }
         Ok(models)
+    }
+
+    pub async fn model_modelfile(&self, model_name: &str) -> anyhow::Result<Option<String>> {
+        let url = format!("{}/api/show", self.base_url());
+        let response = self
+            .client
+            .post(&url)
+            .json(&serde_json::json!({ "name": model_name }))
+            .send()
+            .await?;
+        if !response.status().is_success() {
+            return Ok(None);
+        }
+        let body: serde_json::Value = response.json().await?;
+        Ok(body
+            .get("modelfile")
+            .and_then(|value| value.as_str())
+            .map(str::to_owned))
     }
 
     pub async fn pull_model(&self, model_name: &str) -> anyhow::Result<()> {
@@ -247,13 +268,43 @@ impl OllamaClient {
         &self,
         model_name: &str,
         modelfile_name: Option<&str>,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         let existing = self.list_models().await?;
-        let already_present = existing.iter().any(|m| m.name == model_name);
+        let existing_name = existing
+            .iter()
+            .find(|m| {
+                m.name.strip_suffix(":latest").unwrap_or(&m.name)
+                    == model_name.strip_suffix(":latest").unwrap_or(model_name)
+            })
+            .map(|m| m.name.as_str());
+        let already_present = existing_name.is_some();
 
-        if already_present && modelfile_name.is_none() {
-            info!("Model '{}' already present.", model_name);
-            return Ok(());
+        if already_present {
+            let Some(mf_name) = modelfile_name else {
+                info!("Model '{}' already present; no change needed.", model_name);
+                return Ok(false);
+            };
+            let mf_path = self.config.modfile_dir.join(mf_name);
+            if !mf_path.exists() {
+                info!(
+                    "Model '{}' already present; modelfile unavailable, preserving it.",
+                    model_name
+                );
+                return Ok(false);
+            }
+            let modelfile_modified = std::fs::metadata(&mf_path)?.modified()?;
+            let model_modified: Option<std::time::SystemTime> = existing
+                .iter()
+                .find(|m| Some(m.name.as_str()) == existing_name)
+                .and_then(|m| chrono::DateTime::parse_from_rfc3339(&m.modified_at).ok())
+                .map(|timestamp| timestamp.into());
+            if model_modified.is_some_and(|timestamp| timestamp >= modelfile_modified) {
+                info!(
+                    "Model '{}' is newer than its modelfile; no change needed.",
+                    model_name
+                );
+                return Ok(false);
+            }
         }
 
         if modelfile_name.is_some() {
@@ -275,12 +326,12 @@ impl OllamaClient {
                     );
                     return Err(e);
                 }
-                return Ok(());
+                return Ok(true);
             }
             warn!("Modfile not found at {:?}", mf_path);
         }
 
-        self.pull_model(model_name).await
+        self.pull_model(model_name).await.map(|()| true)
     }
 
     pub async fn warmup_model(&self, model_name: &str, timeout_seconds: u64) -> anyhow::Result<()> {

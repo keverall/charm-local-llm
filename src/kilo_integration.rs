@@ -166,6 +166,14 @@ fn effective_kilo_schema(path: &Path) -> Value {
     if let Some(reference) = fetch_reference_schema(path) {
         merge_reference_schema_updates(&mut schema, &reference);
     }
+    // Kilo accepts provider/model IDs that are not present in its generated
+    // registry (local models, free-tier aliases, and newly released models).
+    // Keep validation focused on config shape rather than a stale model enum.
+    if let Some(model) = schema
+        .pointer_mut("/$defs/AgentConfig/properties/model")
+    {
+        *model = json!({"type": ["string", "null"]});
+    }
     schema
 }
 

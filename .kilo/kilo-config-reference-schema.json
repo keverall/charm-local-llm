@@ -1,0 +1,1475 @@
+{
+  "$defs": {
+    "AgentConfig": {
+      "properties": {
+        "color": {
+          "anyOf": [
+            {
+              "pattern": "^#[0-9a-fA-F]{6}$",
+              "type": "string"
+            },
+            {
+              "enum": [
+                "primary",
+                "secondary",
+                "accent",
+                "success",
+                "warning",
+                "error",
+                "info"
+              ],
+              "type": "string"
+            }
+          ],
+          "description": "Hex color code (e.g., #FF5733) or theme color (e.g., primary)"
+        },
+        "description": {
+          "description": "Description of when to use the agent",
+          "type": "string"
+        },
+        "disable": {
+          "type": "boolean"
+        },
+        "hidden": {
+          "description": "Hide this subagent from the @ autocomplete menu (default: false, only applies to mode: subagent)",
+          "type": "boolean"
+        },
+        "maxSteps": {
+          "description": "@deprecated Use 'steps' field instead.",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "mode": {
+          "enum": [
+            "subagent",
+            "primary",
+            "all"
+          ],
+          "type": "string"
+        },
+        "model": {
+          "$ref": "https://models.dev/model-schema.json#/$defs/Model",
+          "type": "string"
+        },
+        "options": {
+          "type": "object"
+        },
+        "permission": {
+          "$ref": "#/$defs/PermissionConfig"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "steps": {
+          "description": "Maximum number of agentic iterations before forcing text-only response",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "temperature": {
+          "type": "number"
+        },
+        "tools": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "description": "@deprecated Use 'permission' field instead",
+          "type": "object"
+        },
+        "top_p": {
+          "type": "number"
+        },
+        "variant": {
+          "description": "Default model variant for this agent (applies only when using the agent's configured model).",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "AttachmentConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "image": {
+          "$ref": "#/$defs/ImageAttachmentConfig",
+          "description": "Image attachment configuration"
+        }
+      },
+      "type": "object"
+    },
+    "Config": {
+      "additionalProperties": false,
+      "properties": {
+        "$schema": {
+          "description": "JSON schema reference for configuration validation",
+          "type": "string"
+        },
+        "agent": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AgentConfig"
+          },
+          "description": "Agent configuration, see https://opencode.ai/docs/agents",
+          "properties": {
+            "ask": {
+              "additionalProperties": {},
+              "properties": {
+                "model": {
+                  "anyOf": [
+                    {
+                      "$ref": "https://models.dev/model-schema.json#/$defs/Model",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "ref": "AgentConfig",
+              "type": "object"
+            },
+            "build": {
+              "$ref": "#/$defs/AgentConfig"
+            },
+            "compaction": {
+              "$ref": "#/$defs/AgentConfig"
+            },
+            "debug": {
+              "additionalProperties": {},
+              "properties": {
+                "model": {
+                  "anyOf": [
+                    {
+                      "$ref": "https://models.dev/model-schema.json#/$defs/Model",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "ref": "AgentConfig",
+              "type": "object"
+            },
+            "explore": {
+              "$ref": "#/$defs/AgentConfig"
+            },
+            "general": {
+              "$ref": "#/$defs/AgentConfig"
+            },
+            "orchestrator": {
+              "additionalProperties": {},
+              "properties": {
+                "model": {
+                  "anyOf": [
+                    {
+                      "$ref": "https://models.dev/model-schema.json#/$defs/Model",
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              },
+              "ref": "AgentConfig",
+              "type": "object"
+            },
+            "plan": {
+              "$ref": "#/$defs/AgentConfig"
+            },
+            "summary": {
+              "$ref": "#/$defs/AgentConfig"
+            },
+            "title": {
+              "$ref": "#/$defs/AgentConfig"
+            }
+          },
+          "type": "object"
+        },
+        "attachment": {
+          "$ref": "#/$defs/AttachmentConfig",
+          "description": "Attachment processing configuration, including image size limits and resizing behavior"
+        },
+        "auto_collapse_reasoning": {
+          "description": "@deprecated Use 'reasoning_display' field instead. Automatically collapse reasoning blocks after the agent finishes writing them",
+          "type": "boolean"
+        },
+        "auto_expand_history": {
+          "description": "Automatically expand command history when searching",
+          "type": "boolean"
+        },
+        "autoshare": {
+          "description": "@deprecated Use 'share' field instead. Share newly created sessions automatically",
+          "type": "boolean"
+        },
+        "autoupdate": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "enum": [
+                "notify"
+              ],
+              "type": "string"
+            }
+          ],
+          "description": "Automatically update to the latest version. Set to true to auto-update, false to disable, or 'notify' to show update notifications"
+        },
+        "code_edit_display": {
+          "description": "Controls whether code edit and diff blocks are expanded or collapsed by default in the VS Code chat UI",
+          "enum": [
+            "expanded",
+            "collapsed"
+          ],
+          "type": "string"
+        },
+        "command": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "agent": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              },
+              "model": {
+                "$ref": "https://models.dev/model-schema.json#/$defs/Model",
+                "type": "string"
+              },
+              "subtask": {
+                "type": "boolean"
+              },
+              "template": {
+                "type": "string"
+              },
+              "variant": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "template"
+            ],
+            "type": "object"
+          },
+          "description": "Command configuration, see https://opencode.ai/docs/commands",
+          "type": "object"
+        },
+        "commit_message": {
+          "additionalProperties": false,
+          "description": "Configuration for AI-generated commit messages",
+          "properties": {
+            "prompt": {
+              "description": "Custom system prompt for AI commit message generation. When set, replaces the default conventional commits prompt entirely.",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "compaction": {
+          "additionalProperties": false,
+          "properties": {
+            "auto": {
+              "description": "Enable automatic compaction when context is full (default: true)",
+              "type": "boolean"
+            },
+            "preserve_recent_tokens": {
+              "description": "Maximum number of tokens from recent turns to preserve verbatim after compaction",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "prune": {
+              "description": "Enable pruning of old tool outputs (default: false)",
+              "type": "boolean"
+            },
+            "reserved": {
+              "description": "Token buffer for compaction. Leaves enough window to avoid overflow during compaction.",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "tail_turns": {
+              "description": "Maximum number of recent user turns, including their following assistant/tool responses, to keep verbatim during compaction. By default retention is limited only by the preserved token budget.",
+              "maximum": 9007199254740991,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "default_agent": {
+          "description": "Default agent to use when none is specified. Must be a primary agent. Falls back to 'build' if not set or if the specified agent is invalid.",
+          "type": "string"
+        },
+        "disabled_providers": {
+          "description": "Disable providers that are loaded automatically",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enabled_providers": {
+          "description": "When set, ONLY these providers will be enabled. All other providers will be ignored",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "enterprise": {
+          "additionalProperties": false,
+          "properties": {
+            "url": {
+              "description": "Enterprise URL",
+              "type": "string"
+            }
+          },
+          "type": "object"
+        },
+        "experimental": {
+          "additionalProperties": false,
+          "properties": {
+            "agent_requirements": {
+              "description": "Require declared agent skills, MCPs, and VS Code extensions before VS Code prompts can run",
+              "type": "boolean"
+            },
+            "batch_tool": {
+              "description": "Enable the batch tool",
+              "type": "boolean"
+            },
+            "continue_loop_on_deny": {
+              "description": "Continue the agent loop when a tool call is denied",
+              "type": "boolean"
+            },
+            "disable_paste_summary": {
+              "type": "boolean"
+            },
+            "mcp_timeout": {
+              "description": "Timeout in milliseconds for model context protocol (MCP) requests",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "native_notebook_tools": {
+              "description": "Enable native tools for reading, editing, and executing VS Code notebooks",
+              "type": "boolean"
+            },
+            "openTelemetry": {
+              "default": true,
+              "description": "Enable telemetry. Set to false to opt-out.",
+              "type": "boolean"
+            },
+            "policies": {
+              "description": "Policy statements applied to supported resources, such as provider access",
+              "items": {
+                "$ref": "#/$defs/ConfigV2.Experimental.Policy"
+              },
+              "type": "array"
+            },
+            "primary_tools": {
+              "description": "Tools that should only be available to primary agents.",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "formatter": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "additionalProperties": {
+                "additionalProperties": false,
+                "properties": {
+                  "command": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "disabled": {
+                    "type": "boolean"
+                  },
+                  "environment": {
+                    "additionalProperties": {
+                      "type": "string"
+                    },
+                    "type": "object"
+                  },
+                  "extensions": {
+                    "items": {
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              },
+              "type": "object"
+            }
+          ],
+          "description": "Enable or configure formatters. Omit or set to false to disable, true to enable built-ins, or an object to enable built-ins with overrides."
+        },
+        "hide_prompt_training_models": {
+          "description": "Hide Kilo Gateway models that may train on your prompts from model listings",
+          "type": "boolean"
+        },
+        "instructions": {
+          "description": "Additional instruction files or patterns to include",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "layout": {
+          "$ref": "#/$defs/LayoutConfig",
+          "description": "@deprecated Always uses stretch layout."
+        },
+        "logLevel": {
+          "$ref": "#/$defs/LogLevel",
+          "description": "Log level"
+        },
+        "lsp": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "additionalProperties": {
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "disabled": {
+                        "enum": [
+                          true
+                        ],
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "disabled"
+                    ],
+                    "type": "object"
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "command": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "disabled": {
+                        "type": "boolean"
+                      },
+                      "env": {
+                        "additionalProperties": {
+                          "type": "string"
+                        },
+                        "type": "object"
+                      },
+                      "extensions": {
+                        "items": {
+                          "type": "string"
+                        },
+                        "type": "array"
+                      },
+                      "initialization": {
+                        "type": "object"
+                      }
+                    },
+                    "required": [
+                      "command"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "type": "object"
+            }
+          ],
+          "description": "Enable or configure LSP servers. Omit or set to false to disable, true to enable built-ins, or an object to enable built-ins with overrides."
+        },
+        "mcp": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/McpLocalConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/McpRemoteConfig"
+                  }
+                ]
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "enabled"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "description": "MCP (Model Context Protocol) server configurations",
+          "type": "object"
+        },
+        "mode": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AgentConfig"
+          },
+          "description": "@deprecated Use `agent` field instead.",
+          "properties": {
+            "build": {
+              "$ref": "#/$defs/AgentConfig"
+            },
+            "plan": {
+              "$ref": "#/$defs/AgentConfig"
+            }
+          },
+          "type": "object"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "https://models.dev/model-schema.json#/$defs/Model",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Model to use in the format of provider/model, eg anthropic/claude-2"
+        },
+        "permission": {
+          "$ref": "#/$defs/PermissionConfig"
+        },
+        "plugin": {
+          "items": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "maxItems": 2,
+                "minItems": 2,
+                "prefixItems": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "object"
+                  }
+                ],
+                "type": "array"
+              }
+            ]
+          },
+          "type": "array"
+        },
+        "privacy_mode": {
+          "description": "Blur personally identifiable information (account email, balance, team name, etc.) in the TUI and require confirmation before showing profile details",
+          "type": "boolean"
+        },
+        "provider": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ProviderConfig"
+          },
+          "description": "Custom provider configurations and model overrides",
+          "type": "object"
+        },
+        "reasoning_display": {
+          "description": "Controls how reasoning blocks are displayed in the VS Code chat UI",
+          "enum": [
+            "expanded",
+            "preview",
+            "headline"
+          ],
+          "type": "string"
+        },
+        "reference": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/ConfigV2.Reference.Git"
+              },
+              {
+                "$ref": "#/$defs/ConfigV2.Reference.Local"
+              }
+            ]
+          },
+          "description": "@deprecated Use 'references' field instead. Named git or local directory references",
+          "type": "object"
+        },
+        "references": {
+          "additionalProperties": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/ConfigV2.Reference.Git"
+              },
+              {
+                "$ref": "#/$defs/ConfigV2.Reference.Local"
+              }
+            ]
+          },
+          "description": "Named git or local directory references",
+          "type": "object"
+        },
+        "remote_control": {
+          "description": "Enable remote control of sessions via Kilo Cloud. Equivalent to running /remote on startup.",
+          "type": "boolean"
+        },
+        "retention": {
+          "additionalProperties": false,
+          "description": "Machine-wide session retention. Evaluated by the backend; clients only trigger runs.",
+          "properties": {
+            "enabled": {
+              "description": "Enable automatic deletion of old sessions across all projects and every Kilo client on this machine. Defaults to false; deletion is permanent.",
+              "type": "boolean"
+            },
+            "maxAgeDays": {
+              "description": "Days a session is kept before retention deletes it. Defaults to 30, minimum 1.",
+              "minimum": 1,
+              "type": "number"
+            }
+          },
+          "type": "object"
+        },
+        "server": {
+          "$ref": "#/$defs/ServerConfig",
+          "description": "Server configuration for opencode serve and web commands"
+        },
+        "share": {
+          "description": "Control sharing behavior:'manual' allows manual sharing via commands, 'auto' enables automatic sharing, 'disabled' disables all sharing",
+          "enum": [
+            "manual",
+            "auto",
+            "disabled"
+          ],
+          "type": "string"
+        },
+        "shell": {
+          "description": "Default shell to use for terminal and bash tool",
+          "type": "string"
+        },
+        "skills": {
+          "additionalProperties": false,
+          "description": "Additional skill folder paths",
+          "properties": {
+            "paths": {
+              "description": "Additional paths to skill folders",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "urls": {
+              "description": "URLs to fetch skills from (e.g., https://example.com/.well-known/skills/)",
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "small_model": {
+          "anyOf": [
+            {
+              "$ref": "https://models.dev/model-schema.json#/$defs/Model",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Small model to use for tasks like title generation in the format of provider/model"
+        },
+        "snapshot": {
+          "description": "Enable or disable snapshot tracking. When false, filesystem snapshots are not recorded and undoing or reverting will not undo/redo file changes. Defaults to true.",
+          "type": "boolean"
+        },
+        "subagent_depth": {
+          "description": "Maximum subagent nesting depth. Defaults to 1, which prevents subagents from launching subagents.",
+          "maximum": 9007199254740991,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "terminal_command_display": {
+          "description": "Controls whether terminal command blocks are expanded or collapsed by default in the VS Code chat UI",
+          "enum": [
+            "expanded",
+            "collapsed"
+          ],
+          "type": "string"
+        },
+        "tool_output": {
+          "additionalProperties": false,
+          "description": "Thresholds for truncating tool output. When output exceeds either limit, the full text is written to the truncation directory and a preview is returned.",
+          "properties": {
+            "max_bytes": {
+              "description": "Maximum bytes of tool output before it is truncated and saved to disk (default: 51200)",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            },
+            "max_lines": {
+              "description": "Maximum lines of tool output before it is truncated and saved to disk (default: 2000)",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991,
+              "type": "integer"
+            }
+          },
+          "type": "object"
+        },
+        "tools": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "type": "object"
+        },
+        "username": {
+          "description": "Custom username to display in conversations instead of system username",
+          "type": "string"
+        },
+        "watcher": {
+          "additionalProperties": false,
+          "properties": {
+            "ignore": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            }
+          },
+          "type": "object"
+        },
+        "web_search": {
+          "default": false,
+          "description": "Make web search available to models from all providers (default: false)",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ConfigV2.Experimental.Policy": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "anyOf": [
+            {
+              "anyOf": [
+                {
+                  "enum": [
+                    "provider.use"
+                  ],
+                  "type": "string"
+                }
+              ]
+            }
+          ]
+        },
+        "effect": {
+          "$ref": "#/$defs/Policy.Effect"
+        },
+        "resource": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "effect",
+        "resource"
+      ],
+      "type": "object"
+    },
+    "ConfigV2.Reference.Git": {
+      "additionalProperties": false,
+      "properties": {
+        "branch": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "repository": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "repository"
+      ],
+      "type": "object"
+    },
+    "ConfigV2.Reference.Local": {
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string"
+        },
+        "hidden": {
+          "type": "boolean"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "ImageAttachmentConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "auto_resize": {
+          "description": "Resize images before sending them to the model when they exceed configured limits (default: true)",
+          "type": "boolean"
+        },
+        "max_base64_bytes": {
+          "description": "Maximum base64 payload bytes for an image attachment (default: 5242880)",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "max_height": {
+          "description": "Maximum image height before resizing or rejecting the attachment (default: 2000)",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "max_width": {
+          "description": "Maximum image width before resizing or rejecting the attachment (default: 2000)",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "LayoutConfig": {
+      "enum": [
+        "auto",
+        "stretch"
+      ],
+      "type": "string"
+    },
+    "LogLevel": {
+      "description": "Log level",
+      "enum": [
+        "DEBUG",
+        "INFO",
+        "WARN",
+        "ERROR"
+      ],
+      "type": "string"
+    },
+    "McpLocalConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "command": {
+          "description": "Command and arguments to run the MCP server",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "cwd": {
+          "description": "Working directory for the MCP server process. Relative paths resolve from the workspace directory.",
+          "type": "string"
+        },
+        "enabled": {
+          "description": "Enable or disable the MCP server on startup",
+          "type": "boolean"
+        },
+        "environment": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Environment variables to set when running the MCP server",
+          "type": "object"
+        },
+        "timeout": {
+          "description": "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "type": {
+          "description": "Type of MCP server connection",
+          "enum": [
+            "local"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "command"
+      ],
+      "type": "object"
+    },
+    "McpOAuthConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "callbackPort": {
+          "description": "Port for the local OAuth callback server (default: 19876). Shorthand for redirectUri when only the port needs changing. Ignored if redirectUri is set.",
+          "maximum": 65535,
+          "minimum": 1,
+          "type": "integer"
+        },
+        "clientId": {
+          "description": "OAuth client ID. If not provided, dynamic client registration (RFC 7591) will be attempted.",
+          "type": "string"
+        },
+        "clientSecret": {
+          "description": "OAuth client secret (if required by the authorization server)",
+          "type": "string"
+        },
+        "redirectUri": {
+          "description": "OAuth redirect URI (default: http://127.0.0.1:19876/mcp/oauth/callback).",
+          "type": "string"
+        },
+        "scope": {
+          "description": "OAuth scopes to request during authorization",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "McpRemoteConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "description": "Enable or disable the MCP server on startup",
+          "type": "boolean"
+        },
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "Headers to send with the request",
+          "type": "object"
+        },
+        "oauth": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/McpOAuthConfig"
+            },
+            {
+              "enum": [
+                false
+              ],
+              "type": "boolean"
+            }
+          ],
+          "description": "OAuth authentication configuration for the MCP server. Set to false to disable OAuth auto-detection."
+        },
+        "timeout": {
+          "description": "Timeout in ms for MCP server requests. Defaults to 5000 (5 seconds) if not specified.",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        },
+        "type": {
+          "description": "Type of MCP server connection",
+          "enum": [
+            "remote"
+          ],
+          "type": "string"
+        },
+        "url": {
+          "description": "URL of the remote MCP server",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "url"
+      ],
+      "type": "object"
+    },
+    "PermissionActionConfig": {
+      "enum": [
+        "ask",
+        "allow",
+        "deny"
+      ],
+      "type": "string"
+    },
+    "PermissionConfig": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PermissionActionConfig"
+        },
+        {
+          "additionalProperties": {
+            "$ref": "#/$defs/PermissionRuleConfig"
+          },
+          "properties": {
+            "bash": {
+              "$ref": "#/$defs/PermissionRuleConfig"
+            },
+            "doom_loop": {
+              "$ref": "#/$defs/PermissionActionConfig"
+            },
+            "edit": {
+              "$ref": "#/$defs/PermissionRuleConfig"
+            },
+            "external_directory": {
+              "$ref": "#/$defs/PermissionRuleConfig"
+            },
+            "glob": {
+              "$ref": "#/$defs/PermissionRuleConfig"
+            },
+            "grep": {
+              "$ref": "#/$defs/PermissionRuleConfig"
+            },
+            "list": {
+              "$ref": "#/$defs/PermissionRuleConfig"
+            },
+            "lsp": {
+              "$ref": "#/$defs/PermissionRuleConfig"
+            },
+            "notebook_edit": {
+              "$ref": "#/$defs/PermissionRuleConfig"
+            },
+            "notebook_execute": {
+              "$ref": "#/$defs/PermissionRuleConfig"
+            },
+            "notebook_read": {
+              "$ref": "#/$defs/PermissionRuleConfig"
+            },
+            "question": {
+              "$ref": "#/$defs/PermissionActionConfig"
+            },
+            "read": {
+              "$ref": "#/$defs/PermissionRuleConfig"
+            },
+            "skill": {
+              "$ref": "#/$defs/PermissionRuleConfig"
+            },
+            "task": {
+              "$ref": "#/$defs/PermissionRuleConfig"
+            },
+            "todowrite": {
+              "$ref": "#/$defs/PermissionActionConfig"
+            },
+            "webfetch": {
+              "$ref": "#/$defs/PermissionActionConfig"
+            },
+            "websearch": {
+              "$ref": "#/$defs/PermissionActionConfig"
+            }
+          },
+          "type": "object"
+        }
+      ]
+    },
+    "PermissionObjectConfig": {
+      "additionalProperties": {
+        "$ref": "#/$defs/PermissionActionConfig"
+      },
+      "type": "object"
+    },
+    "PermissionRuleConfig": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/PermissionActionConfig"
+        },
+        {
+          "$ref": "#/$defs/PermissionObjectConfig"
+        }
+      ]
+    },
+    "Policy.Effect": {
+      "enum": [
+        "allow",
+        "deny"
+      ],
+      "type": "string"
+    },
+    "ProviderConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "api": {
+          "type": "string"
+        },
+        "blacklist": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "env": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "id": {
+          "type": "string"
+        },
+        "models": {
+          "additionalProperties": {
+            "additionalProperties": false,
+            "properties": {
+              "attachment": {
+                "type": "boolean"
+              },
+              "cost": {
+                "additionalProperties": false,
+                "properties": {
+                  "cache_read": {
+                    "type": "number"
+                  },
+                  "cache_write": {
+                    "type": "number"
+                  },
+                  "context_over_200k": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "cache_read": {
+                        "type": "number"
+                      },
+                      "cache_write": {
+                        "type": "number"
+                      },
+                      "input": {
+                        "type": "number"
+                      },
+                      "output": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "input",
+                      "output"
+                    ],
+                    "type": "object"
+                  },
+                  "input": {
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "input",
+                  "output"
+                ],
+                "type": "object"
+              },
+              "experimental": {
+                "type": "boolean"
+              },
+              "family": {
+                "type": "string"
+              },
+              "headers": {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              "id": {
+                "type": "string"
+              },
+              "interleaved": {
+                "anyOf": [
+                  {
+                    "type": "boolean"
+                  },
+                  {
+                    "anyOf": [
+                      {
+                        "enum": [
+                          "reasoning",
+                          "reasoning_content",
+                          "reasoning_text"
+                        ],
+                        "type": "string"
+                      },
+                      {
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  {
+                    "additionalProperties": false,
+                    "properties": {
+                      "field": {
+                        "anyOf": [
+                          {
+                            "enum": [
+                              "reasoning",
+                              "reasoning_content",
+                              "reasoning_text"
+                            ],
+                            "type": "string"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "field"
+                    ],
+                    "type": "object"
+                  }
+                ]
+              },
+              "limit": {
+                "additionalProperties": false,
+                "properties": {
+                  "context": {
+                    "type": "number"
+                  },
+                  "input": {
+                    "type": "number"
+                  },
+                  "output": {
+                    "type": "number"
+                  }
+                },
+                "required": [
+                  "context",
+                  "output"
+                ],
+                "type": "object"
+              },
+              "modalities": {
+                "additionalProperties": false,
+                "properties": {
+                  "input": {
+                    "items": {
+                      "enum": [
+                        "text",
+                        "audio",
+                        "image",
+                        "video",
+                        "pdf"
+                      ],
+                      "type": "string"
+                    },
+                    "type": "array"
+                  },
+                  "output": {
+                    "items": {
+                      "enum": [
+                        "text",
+                        "audio",
+                        "image",
+                        "video",
+                        "pdf"
+                      ],
+                      "type": "string"
+                    },
+                    "type": "array"
+                  }
+                },
+                "type": "object"
+              },
+              "name": {
+                "type": "string"
+              },
+              "options": {
+                "type": "object"
+              },
+              "provider": {
+                "additionalProperties": false,
+                "properties": {
+                  "api": {
+                    "type": "string"
+                  },
+                  "npm": {
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              },
+              "reasoning": {
+                "type": "boolean"
+              },
+              "release_date": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "alpha",
+                  "beta",
+                  "deprecated",
+                  "active"
+                ],
+                "type": "string"
+              },
+              "temperature": {
+                "type": "boolean"
+              },
+              "tool_call": {
+                "type": "boolean"
+              },
+              "variants": {
+                "additionalProperties": {
+                  "properties": {
+                    "disabled": {
+                      "description": "Disable this variant for the model",
+                      "type": "boolean"
+                    }
+                  },
+                  "type": "object"
+                },
+                "description": "Variant-specific configuration",
+                "type": "object"
+              }
+            },
+            "type": "object"
+          },
+          "type": "object"
+        },
+        "name": {
+          "type": "string"
+        },
+        "npm": {
+          "type": "string"
+        },
+        "options": {
+          "properties": {
+            "apiKey": {
+              "type": "string"
+            },
+            "baseURL": {
+              "type": "string"
+            },
+            "chunkTimeout": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                {
+                  "enum": [
+                    false
+                  ],
+                  "type": "boolean"
+                }
+              ],
+              "description": "Timeout in milliseconds between streamed SSE chunks for this provider (default: 300000). If no chunk arrives within this window, the request is aborted. Set to false to disable timeout."
+            },
+            "enterpriseUrl": {
+              "description": "GitHub Enterprise URL for copilot authentication",
+              "type": "string"
+            },
+            "headerTimeout": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                {
+                  "enum": [
+                    false
+                  ],
+                  "type": "boolean"
+                }
+              ],
+              "description": "Timeout in milliseconds to wait for response headers (default: 300000). Set to false to disable timeout."
+            },
+            "setCacheKey": {
+              "description": "Enable promptCacheKey for this provider (default false)",
+              "type": "boolean"
+            },
+            "timeout": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 9007199254740991,
+                  "type": "integer"
+                },
+                {
+                  "enum": [
+                    false
+                  ],
+                  "type": "boolean"
+                }
+              ],
+              "description": "Timeout in milliseconds for full requests to this provider. Set to false to disable timeout."
+            }
+          },
+          "type": "object"
+        },
+        "whitelist": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "ServerConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "cors": {
+          "description": "Additional domains to allow for CORS",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "hostname": {
+          "description": "Hostname to listen on",
+          "type": "string"
+        },
+        "mdns": {
+          "description": "Enable mDNS service discovery",
+          "type": "boolean"
+        },
+        "mdnsDomain": {
+          "description": "Custom domain name for mDNS service (default: opencode.local)",
+          "type": "string"
+        },
+        "port": {
+          "description": "Port to listen on",
+          "exclusiveMinimum": 0,
+          "maximum": 9007199254740991,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$ref": "#/$defs/Config",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "allowComments": true,
+  "allowTrailingCommas": true
+}

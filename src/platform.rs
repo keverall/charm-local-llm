@@ -202,11 +202,35 @@ pub fn detect_platform_env_path(project_root: &Path, platform: Platform) -> Path
 /// starts (systemd user unit, XDG autostart) resolve the repo correctly even
 /// though their working directory is `$HOME`.
 pub fn project_root_marker_path() -> PathBuf {
-    dirs::home_dir()
+    effective_user_home()
         .unwrap_or_else(|| PathBuf::from("."))
         .join(".config")
         .join("kcharm")
         .join("project-root")
+}
+
+/// Resolve the home directory of the interactive user when kcharm is invoked
+/// through `sudo`, rather than accidentally using root's home directory.
+pub fn effective_user_home() -> Option<PathBuf> {
+    let user = std::env::var("SUDO_USER")
+        .ok()
+        .filter(|user| !user.is_empty())
+        .or_else(|| std::env::var("USER").ok());
+    let Some(user) = user else {
+        return dirs::home_dir();
+    };
+
+    let output = Command::new("getent")
+        .args(["passwd", &user])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let entry = String::from_utf8_lossy(&output.stdout);
+        if let Some(home) = entry.trim().split(':').nth(5) {
+            return Some(PathBuf::from(home));
+        }
+    }
+    dirs::home_dir()
 }
 
 /// True only when `dir` is the actual charm-local-llm checkout.

@@ -6,7 +6,8 @@ use crate::cli::{
 use crate::ollama::{ollama_running, ollama_version_mismatch, start_ollama_direct, OllamaClient};
 use crate::platform::{
     check_nvidia_smi, compose_command, detect_platform, detect_platform_env_path,
-    ensure_docker_running, find_ollama_bin, load_env_file, resolve_project_root, save_project_root,
+    effective_user_home, ensure_docker_running, find_ollama_bin, load_env_file,
+    resolve_project_root, save_project_root,
 };
 use crate::{Config, Platform};
 use std::path::{Path, PathBuf};
@@ -416,7 +417,7 @@ fn write_privileged_sudoers(dest: &Path, src: &Path) -> bool {
 
 /// Resolve the kcharm binary used by boot-time units.
 fn kcharm_bin_path() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = effective_user_home().unwrap_or_else(|| PathBuf::from("."));
     if home.join(".local/bin/kcharm").exists() {
         home.join(".local/bin/kcharm")
     } else {
@@ -433,7 +434,7 @@ fn kcharm_bin_path() -> PathBuf {
 /// causing "docker-compose.yml: no such file or directory" and a silently
 /// missing Qdrant container.
 fn setup_boot_start(config: &Config) -> anyhow::Result<()> {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
+    let home = effective_user_home().unwrap_or_else(|| PathBuf::from("."));
 
     // Record the project root so any non-interactive start can find the repo.
     if let Err(e) = save_project_root(&config.project_root) {
@@ -471,11 +472,44 @@ fn setup_boot_start(config: &Config) -> anyhow::Result<()> {
     let unit = unit_dir.join("kcharm-start.service");
     std::fs::write(&unit, content)?;
 
-    let _ = ProcessCommand::new("systemctl")
-        .args(["--user", "daemon-reload"])
-        .status();
-    let enabled = ProcessCommand::new("systemctl")
-        .args(["--user", "enable", "kcharm-start.service"])
+    let target_user = whoami_user();
+    let target_uid = ProcessCommand::new("id")
+        .args(["-u", &target_user])
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+    let mut userctl = ProcessCommand::new("sudo");
+    if unsafe { libc::geteuid() } == 0 && target_user != "root" {
+        userctl.args(["-u", &target_user, "env"]);
+        if let Some(uid) = &target_uid {
+            userctl.args([
+                &format!("XDG_RUNTIME_DIR=/run/user/{uid}"),
+                &format!("DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus"),
+            ]);
+        }
+        userctl.args(["systemctl", "--user"]);
+    } else {
+        userctl.args(["systemctl", "--user"]);
+    }
+    let _ = userctl.arg("daemon-reload").status();
+
+    let mut userctl = ProcessCommand::new("sudo");
+    if unsafe { libc::geteuid() } == 0 && target_user != "root" {
+        userctl.args(["-u", &target_user, "env"]);
+        if let Some(uid) = &target_uid {
+            userctl.args([
+                &format!("XDG_RUNTIME_DIR=/run/user/{uid}"),
+                &format!("DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus"),
+            ]);
+        }
+        userctl.args(["systemctl", "--user"]);
+    } else {
+        userctl.args(["systemctl", "--user"]);
+    }
+    let enabled = userctl
+        .arg("enable")
+        .arg("kcharm-start.service")
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
@@ -512,7 +546,9 @@ fn setup_boot_start(config: &Config) -> anyhow::Result<()> {
 }
 
 fn whoami_user() -> String {
-    std::env::var("USER").unwrap_or_else(|_| "root".to_string())
+    std::env::var("SUDO_USER")
+        .or_else(|_| std::env::var("USER"))
+        .unwrap_or_else(|_| "root".to_string())
 }
 
 /// Run the full one-time OS bootstrap: systemd unit, passwordless sudo, and
@@ -737,8 +773,6 @@ async fn phase_ensure_ollama(config: &Config) -> anyhow::Result<()> {
 /// and config generation. Base models pulled only as `FROM` dependencies are
 /// cleaned up afterward.
 async fn phase_ensure_models(config: &Config) -> anyhow::Result<OllamaClient> {
-    crate::platform::wait_for_registry_or_alert(180).await?;
-
     println!("📦 Ensuring models are present...");
     let client = OllamaClient::new(config.clone());
 
@@ -765,14 +799,28 @@ async fn phase_ensure_models(config: &Config) -> anyhow::Result<OllamaClient> {
         }
     }
 
+    let existing_before = client.list_models().await.unwrap_or_default();
+    if models_to_check
+        .iter()
+        .any(|(model, _)| !existing_before.iter().any(|m| m.name == *model))
+    {
+        crate::platform::wait_for_registry_or_alert(180).await?;
+    }
+
+    let mut models_changed = false;
     for (model, modelfile) in models_to_check {
-        if let Err(e) = client.ensure_model(&model, modelfile.as_deref()).await {
-            warn!("Failed to ensure model '{}': {}", model, e);
+        match client.ensure_model(&model, modelfile.as_deref()).await {
+            Ok(changed) => models_changed |= changed,
+            Err(e) => warn!("Failed to ensure model '{}': {}", model, e),
         }
     }
 
-    println!("🔥 Warming up models...");
-    let _ = warmup_models(&client, config).await;
+    if models_changed {
+        println!("🔥 Warming changed models...");
+        let _ = warmup_models(&client, config).await;
+    } else {
+        println!("✅ Models unchanged; preserving Ollama residency.");
+    }
 
     let normalize = |name: &str| -> String {
         name.strip_suffix(":latest")
@@ -814,7 +862,14 @@ async fn phase_configure_assistants(config: &Config, client: &OllamaClient) {
         .into_iter()
         .map(|m| m.name)
         .collect();
-    match crate::kilo_integration::patch_kilo_indexing(config, Some(&available_models)) {
+    let config_for_kilo = config.clone();
+    let available_for_kilo = available_models.clone();
+    match tokio::task::spawn_blocking(move || {
+        crate::kilo_integration::patch_kilo_indexing(&config_for_kilo, Some(&available_for_kilo))
+    })
+    .await
+    .unwrap_or_else(|e| Err(anyhow::anyhow!("Kilo config task failed: {e}")))
+    {
         Ok(true) => println!(
             "   ✅ Kilo config updated (provider models synced to {} Ollama models)",
             available_models.len()
@@ -822,7 +877,12 @@ async fn phase_configure_assistants(config: &Config, client: &OllamaClient) {
         Ok(false) => println!("   ✅ Kilo config up to date"),
         Err(e) => warn!("   Failed to patch Kilo config: {}", e),
     }
-    let _ = crate::kilo_integration::clean_project_kilo_config(&config.project_root, config);
+    let config_for_cleanup = config.clone();
+    let project_root = config.project_root.clone();
+    let _ = tokio::task::spawn_blocking(move || {
+        crate::kilo_integration::clean_project_kilo_config(&project_root, &config_for_cleanup)
+    })
+    .await;
     match crate::kilo_integration::write_agents_md(config, &config.project_root) {
         Ok(path) => println!("   ✅ AGENTS.md: {}", path.display()),
         Err(e) => warn!("   Failed to write AGENTS.md: {}", e),
@@ -1456,7 +1516,7 @@ async fn print_final_status(client: &OllamaClient) {
     if let Ok(running) = client.list_running_models().await {
         println!("Loaded Models:");
         if running.is_empty() {
-            println!("  Could not list running models");
+            println!("  (none)");
         } else {
             for m in running {
                 println!("  - {} (VRAM: {} bytes)", m.name, m.size_vram);
