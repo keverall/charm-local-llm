@@ -20,7 +20,8 @@
         "-y",
         "@modelcontextprotocol/server-duckduckgo"
       ],
-      "type": "local"
+      "type": "local",
+      "enabled": true
     }
   }
 }
